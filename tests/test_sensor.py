@@ -22,6 +22,7 @@ from custom_components.bookoo_ble.const import (
     UNIT_GRAMS,
     UNIT_GRAMS_PER_SECOND,
 )
+from custom_components.bookoo_ble.device import BookooDevice # Corrected import location
 from custom_components.bookoo_ble.sensor import (
     BookooDataUpdateCoordinator,
     BookooSensor,
@@ -42,6 +43,16 @@ def mock_config_entry():
 
 
 @pytest.fixture
+def mock_bookoo_device(mock_ble_manager):
+    """Create a mock BookooDevice."""
+    device = MagicMock(spec=BookooDevice)
+    device.ble_manager = mock_ble_manager  # Assign existing mock_ble_manager
+    # This mock will be called by BookooDataUpdateCoordinator to register its _handle_notification
+    device.set_external_notification_callback = MagicMock()
+    return device
+
+
+@pytest.fixture
 def mock_ble_manager():
     """Create a mock BLE manager."""
     manager = MagicMock()
@@ -51,21 +62,23 @@ def mock_ble_manager():
 
 
 @pytest.fixture
-async def coordinator(hass: HomeAssistant, mock_config_entry, mock_ble_manager):
+async def coordinator(hass: HomeAssistant, mock_config_entry, mock_bookoo_device):
     """Create a test coordinator."""
-    coordinator = BookooDataUpdateCoordinator(
-        hass, mock_ble_manager, mock_config_entry
+    # Pass mock_bookoo_device instead of mock_ble_manager
+    coordinator_instance = BookooDataUpdateCoordinator(
+        hass, mock_bookoo_device, mock_config_entry
     )
     # Set initial data
-    coordinator.data = {
+    coordinator_instance.data = {
         ATTR_WEIGHT: 123.4,
         ATTR_FLOW_RATE: 5.6,
         ATTR_TIMER: "01:23",
         ATTR_BATTERY_LEVEL: 85,
         "raw_timer_ms": 83000,
+        "timer_status": "stopped",  # Add initial timer_status for completeness
     }
-    coordinator.last_update_success = True
-    return coordinator
+    coordinator_instance.last_update_success = True
+    return coordinator_instance
 
 
 class TestBookooSensor:
@@ -95,7 +108,7 @@ class TestBookooSensor:
         assert weight_sensor.available is True
 
         # Disconnect BLE
-        mock_ble_manager.is_connected = False
+        coordinator.bookoo_device.ble_manager.is_connected = False
         assert weight_sensor.available is False
 
     async def test_sensor_extra_attributes(
@@ -114,55 +127,53 @@ class TestBookooSensor:
 class TestBookooDataUpdateCoordinator:
     """Test Bookoo data update coordinator."""
 
-    async def test_notification_handling(
-        self, hass: HomeAssistant, coordinator, mock_ble_manager
+    async def test_handle_weight_notification(
+        self, hass: HomeAssistant, coordinator: BookooDataUpdateCoordinator
     ):
-        """Test handling of BLE notifications."""
-        # Get the notification callback
-        callback = mock_ble_manager.set_notification_callback.call_args[0][0]
+        """Test handling of a parsed weight notification by the coordinator."""
+        # Get the callback registered by coordinator with mock_bookoo_device
+        # This callback is coordinator._handle_notification
+        callback = coordinator.bookoo_device.set_external_notification_callback.call_args[0][0]
+        assert callback == coordinator._handle_notification
 
-        # Simulate weight notification
-        weight_data = bytes([
-            0x03, 0x0B,  # Header
-            0x00, 0x01, 0x4C,  # Timer: 332ms
-            0x00,  # Unit
-            0x00,  # Weight sign
-            0x00, 0x04, 0xD2,  # Weight: 12.34g
-            0x00,  # Flow sign
-            0x00, 0x64,  # Flow: 1.0 g/s
-            0x5A,  # Battery: 90%
-            0x00, 0x0A,  # Standby: 10 min
-            0x02,  # Buzzer: 2
-            0x01,  # Flow smoothing: on
-            0x00, 0x00,  # Reserved
-            0x00,  # Checksum placeholder
-        ])
-        # Fix checksum
-        checksum = 0
-        for b in weight_data[:-1]:
-            checksum ^= b
-        weight_data = weight_data[:-1] + bytes([checksum])
+        parsed_weight_data = {
+            ATTR_WEIGHT: 12.34,
+            ATTR_FLOW_RATE: 1.0,
+            ATTR_TIMER: "00:05", # Example formatted timer
+            "raw_timer_ms": 5000,
+            ATTR_BATTERY_LEVEL: 90,
+            ATTR_STABLE: False,
+            ATTR_BEEP_LEVEL: 2,
+            ATTR_AUTO_OFF_MINUTES: 10,
+            ATTR_FLOW_SMOOTHING: True,
+            "message_type": "weight",
+        }
 
-        # Call the callback
-        callback(weight_data)
+        with patch.object(coordinator, 'async_set_updated_data') as mock_set_updated_data:
+            callback(parsed_weight_data) # Call _handle_notification
+            mock_set_updated_data.assert_called_once_with(parsed_weight_data)
+        
+        assert coordinator._last_notification_data == parsed_weight_data
 
-        # Check coordinator data was updated
-        assert coordinator.data[ATTR_WEIGHT] == 12.34
-        assert coordinator.data[ATTR_FLOW_RATE] == 1.0
-        assert coordinator.data[ATTR_BATTERY_LEVEL] == 90
 
-    async def test_status_notification_handling(
-        self, hass: HomeAssistant, coordinator, mock_ble_manager
+    async def test_handle_status_notification(
+        self, hass: HomeAssistant, coordinator: BookooDataUpdateCoordinator
     ):
-        """Test handling of status notifications."""
-        callback = mock_ble_manager.set_notification_callback.call_args[0][0]
+        """Test handling of a parsed status notification by the coordinator."""
+        callback = coordinator.bookoo_device.set_external_notification_callback.call_args[0][0]
+        assert callback == coordinator._handle_notification
 
-        # Simulate status notification (timer start)
-        status_data = bytes.fromhex("030d01000000000000000000000000000000000f")
-        callback(status_data)
+        parsed_status_data = {
+            "timer_status": "started",
+            "raw_status_byte": 0x01,
+            "message_type": "status",
+        }
+        
+        with patch.object(coordinator, 'async_set_updated_data') as mock_set_updated_data:
+            callback(parsed_status_data)
+            mock_set_updated_data.assert_called_once_with(parsed_status_data)
 
-        # Check timer status was updated
-        assert coordinator.data.get("timer_status") == "started"
+        assert coordinator._last_notification_data == parsed_status_data
 
 
 @pytest.mark.asyncio
@@ -184,8 +195,10 @@ async def test_async_setup_entry(hass: HomeAssistant, mock_config_entry):
             ATTR_BATTERY_LEVEL: 100,
         }
         mock_coordinator.last_update_success = True
-        mock_coordinator.ble_manager = MagicMock()
-        mock_coordinator.ble_manager.is_connected = True
+        # Mock BookooDevice and its ble_manager
+        mock_coordinator.bookoo_device = MagicMock(spec=BookooDevice)
+        mock_coordinator.bookoo_device.ble_manager = MagicMock()
+        mock_coordinator.bookoo_device.ble_manager.is_connected = True
 
         # Store coordinator
         hass.data[DOMAIN] = {mock_config_entry.entry_id: mock_coordinator}

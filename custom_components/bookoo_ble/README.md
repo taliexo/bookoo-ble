@@ -119,6 +119,52 @@ target:
   entity_id: sensor.bookoo_scale_timer
 ```
 
+### bookoo_ble.tare_and_start_timer
+
+Zero the scale and start the timer in one command.
+
+```yaml
+service: bookoo_ble.tare_and_start_timer
+target:
+  entity_id: sensor.bookoo_scale_timer # Or sensor.bookoo_scale_weight
+```
+
+### bookoo_ble.set_beep_level
+
+Set the beep volume level.
+
+```yaml
+service: bookoo_ble.set_beep_level
+target:
+  entity_id: sensor.bookoo_scale_weight # Any Bookoo sensor entity
+data:
+  level: 3 # Volume level (0-5, 0 = silent)
+```
+
+### bookoo_ble.set_auto_off
+
+Set the auto-off duration in minutes.
+
+```yaml
+service: bookoo_ble.set_auto_off
+target:
+  entity_id: sensor.bookoo_scale_weight # Any Bookoo sensor entity
+data:
+  minutes: 10 # Auto-off duration in minutes (1-30)
+```
+
+### bookoo_ble.set_flow_smoothing
+
+Enable or disable flow rate smoothing.
+
+```yaml
+service: bookoo_ble.set_flow_smoothing
+target:
+  entity_id: sensor.bookoo_scale_weight # Any Bookoo sensor entity
+data:
+  enabled: true # true to enable, false to disable
+```
+
 ## Troubleshooting
 
 ### Scale not discovered

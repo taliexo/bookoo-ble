@@ -191,7 +191,7 @@ class BookooSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        return self.coordinator.last_update_success and self.coordinator.ble_manager.is_connected
+        return self.coordinator.last_update_success and self.coordinator.bookoo_device.ble_manager.is_connected
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:

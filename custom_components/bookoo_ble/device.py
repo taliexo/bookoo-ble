@@ -7,7 +7,7 @@ from .constants import (
     CMD_START_TIMER,
     CMD_STOP_TIMER,
     CMD_RESET_TIMER,
-    CMD_TARE_AND_START_TIMER,
+    CMD_TARE_AND_START,
     cmd_set_beep,
     cmd_set_auto_off,
     cmd_set_flow_smoothing,
@@ -25,9 +25,6 @@ from .helpers import validate_checksum, format_timer # generate_checksum_byte is
 
 _LOGGER = logging.getLogger(__name__)
 
-# Note: MSG_TYPE_STATUS might need to be defined or confirmed in constants.py
-# For now, we'll use the literal values as observed if not in constants.
-# Ideally, constants.py would have MSG_TYPE_WEIGHT = 0x0B, MSG_TYPE_STATUS_RESPONSE = 0x0D (if that's the type byte)
 
 class BookooDevice:
     """Represents a Bookoo BLE device, handling commands and data parsing."""
@@ -93,7 +90,7 @@ class BookooDevice:
 
     async def async_tare_and_start_timer(self) -> bool:
         """Send tare and start timer command."""
-        return await self.ble_manager.async_write_command(CMD_TARE_AND_START_TIMER)
+        return await self.ble_manager.async_write_command(CMD_TARE_AND_START)
 
     async def async_set_beep_level(self, level: int) -> bool:
         """Send set beep level command."""
