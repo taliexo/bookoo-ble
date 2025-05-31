@@ -8,7 +8,7 @@ from .const import (
     CMD_START_TIMER,
     CMD_STOP_TIMER,
     CMD_RESET_TIMER,
-    CMD_TARE_AND_START,
+    CMD_TARE_AND_START_TIMER,
     cmd_set_beep,
     cmd_set_auto_off,
     cmd_set_flow_smoothing,
