@@ -1,0 +1,176 @@
+{
+    "config": {
+      "step": {
+        "user": {
+          "title": "Bookoo BLE Setup",
+          "description": "Set up your Bookoo scale for Bluetooth monitoring.",
+          "data": {
+            "manual_entry": "Enter MAC address manually"
+          }
+        },
+        "scan": {
+          "title": "Select Bookoo Device",
+          "description": "Select your Bookoo scale from the list of discovered devices. Make sure your scale is powered on and showing the Bluetooth icon.",
+          "data": {
+            "address": "Device"
+          }
+        },
+        "manual": {
+          "title": "Manual Configuration",
+          "description": "Enter the MAC address of your Bookoo scale. You can find this in your scale's settings or documentation.",
+          "data": {
+            "address": "MAC Address",
+            "name": "Device Name"
+          }
+        },
+        "configure": {
+          "title": "Configure Bookoo Scale",
+          "description": "Configure settings for {device}",
+          "data": {
+            "name": "Name",
+            "beep_level": "Beep Volume (0-5)",
+            "auto_off_minutes": "Auto-off Timer",
+            "flow_smoothing": "Enable Flow Smoothing"
+          }
+        },
+        "bluetooth_confirm": {
+          "title": "Discovered Bookoo Scale",
+          "description": "Setup {name} ({address})?"
+        }
+      },
+      "error": {
+        "no_devices_found": "No Bookoo devices found. Make sure your {device_name} is powered on and in range.",
+        "scan_error": "Error scanning for Bluetooth devices. Check your Bluetooth adapter.",
+        "invalid_address": "Invalid MAC address format. Use format XX:XX:XX:XX:XX:XX",
+        "cannot_connect": "Failed to connect to device. Make sure it's powered on and in range.",
+        "unknown": "Unexpected error occurred"
+      },
+      "abort": {
+        "already_configured": "Device is already configured",
+        "no_devices_found": "No devices found"
+      }
+    },
+    "options": {
+      "step": {
+        "init": {
+          "title": "Bookoo Scale Options",
+          "description": "Configure your Bookoo scale settings",
+          "data": {
+            "beep_level": "Beep Volume (0-5)",
+            "auto_off_minutes": "Auto-off Timer (minutes)",
+            "flow_smoothing": "Enable Flow Smoothing"
+          }
+        }
+      }
+    },
+    "entity": {
+      "sensor": {
+        "weight": {
+          "name": "Weight"
+        },
+        "flow_rate": {
+          "name": "Flow Rate"
+        },
+        "timer": {
+          "name": "Timer"
+        },
+        "battery_level": {
+          "name": "Battery Level"
+        }
+      }
+    },
+    "services": {
+      "tare": {
+        "name": "Tare",
+        "description": "Zero the scale (tare)",
+        "fields": {
+          "entity_id": {
+            "name": "Entity",
+            "description": "Bookoo scale entity to tare"
+          }
+        }
+      },
+      "start_timer": {
+        "name": "Start Timer",
+        "description": "Start the scale's built-in timer",
+        "fields": {
+          "entity_id": {
+            "name": "Entity",
+            "description": "Bookoo scale entity"
+          }
+        }
+      },
+      "stop_timer": {
+        "name": "Stop Timer",
+        "description": "Stop the scale's built-in timer",
+        "fields": {
+          "entity_id": {
+            "name": "Entity",
+            "description": "Bookoo scale entity"
+          }
+        }
+      },
+      "reset_timer": {
+        "name": "Reset Timer",
+        "description": "Reset the scale's timer to 00:00",
+        "fields": {
+          "entity_id": {
+            "name": "Entity",
+            "description": "Bookoo scale entity"
+          }
+        }
+      },
+      "tare_and_start_timer": {
+        "name": "Tare and Start Timer",
+        "description": "Zero the scale and start timer in one command",
+        "fields": {
+          "entity_id": {
+            "name": "Entity",
+            "description": "Bookoo scale entity"
+          }
+        }
+      },
+      "set_beep_level": {
+        "name": "Set Beep Level",
+        "description": "Set the beep volume level (0-5, 0 = silent)",
+        "fields": {
+          "entity_id": {
+            "name": "Entity",
+            "description": "Bookoo scale entity"
+          },
+          "level": {
+            "name": "Level",
+            "description": "Beep volume level (0-5)"
+          }
+        }
+      },
+      "set_auto_off": {
+        "name": "Set Auto-off Timer",
+        "description": "Set the auto-off duration in minutes (1-30)",
+        "fields": {
+          "entity_id": {
+            "name": "Entity",
+            "description": "Bookoo scale entity"
+          },
+          "minutes": {
+            "name": "Minutes",
+            "description": "Auto-off duration in minutes (1-30)"
+          }
+        }
+      },
+      "set_flow_smoothing": {
+        "name": "Set Flow Smoothing",
+        "description": "Enable or disable flow rate smoothing",
+        "fields": {
+          "entity_id": {
+            "name": "Entity",
+            "description": "Bookoo scale entity"
+          },
+          "enabled": {
+            "name": "Enabled",
+            "description": "Enable flow smoothing"
+          }
+        }
+      }
+    }
+  }
