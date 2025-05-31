@@ -7,6 +7,7 @@ from homeassistant import config_entries
 from homeassistant.components import bluetooth
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.core import callback
 from homeassistant.helpers.selector import selector
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
@@ -24,6 +25,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+@config_entries.HANDLERS.register(DOMAIN)
 class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Bookoo BLE."""
 
@@ -33,6 +35,14 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._discovered_devices: Dict[str, BLEDevice] = {}
         self._discovered_device: Optional[BLEDevice] = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Get the options flow for this handler."""
+        return BookooOptionsFlowHandler(config_entry)
 
     async def async_step_user(
         self, user_input: Dict[str, Any] | None = None
@@ -279,3 +289,62 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return False
         
         return True
+
+
+class BookooOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle Bookoo BLE options."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: Dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        errors = {}
+
+        if user_input is not None:
+            # Update the config entry with new options
+            return self.async_create_entry(title="", data=user_input)
+
+        # Populate form with current settings or defaults
+        # Prioritize options, then data, then constants
+        beep_level = self.config_entry.options.get(
+            "beep_level", self.config_entry.data.get("beep_level", DEFAULT_BEEP_LEVEL)
+        )
+        auto_off_minutes = self.config_entry.options.get(
+            "auto_off_minutes", self.config_entry.data.get("auto_off_minutes", DEFAULT_AUTO_OFF_MINUTES)
+        )
+        flow_smoothing = self.config_entry.options.get(
+            "flow_smoothing", self.config_entry.data.get("flow_smoothing", DEFAULT_FLOW_SMOOTHING)
+        )
+
+        options_schema = vol.Schema(
+            {
+                vol.Optional("beep_level", default=beep_level): selector({
+                    "number": {
+                        "min": 0,
+                        "max": 5,
+                        "mode": "slider",
+                    }
+                }),
+                vol.Optional("auto_off_minutes", default=auto_off_minutes): selector({
+                    "number": {
+                        "min": 1,
+                        "max": 30,
+                        "unit_of_measurement": "minutes",
+                    }
+                }),
+                vol.Optional("flow_smoothing", default=flow_smoothing): bool,
+            }
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=options_schema,
+            errors=errors,
+            description_placeholders={ # Optional: Add placeholders if needed
+                "device_name": self.config_entry.data.get(CONF_NAME, DEFAULT_NAME)
+            }
+        )

@@ -22,6 +22,7 @@ DFU_CHAR_UUID: Final = "8EC90003-F315-4F60-9FB8-838830DAEA50"
 # Message types (first byte of notification)
 MSG_TYPE_COMMAND: Final = 0x0A # This is likely for commands sent TO the device, or responses.
 MSG_TYPE_WEIGHT: Final = 0x0B # This is data[1] for weight/sensor notifications FROM the device.
+MSG_TYPE_TIMER_STATUS: Final = 0x0D # This is data[1] for timer status notifications (undocumented) FROM the device.
 
 # Commands
 CMD_TARE: Final = bytes([0x03, 0x0A, 0x01, 0x00, 0x00, 0x08])

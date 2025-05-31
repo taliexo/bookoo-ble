@@ -3,12 +3,12 @@ import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ADDRESS, CONF_NAME
+from homeassistant.const import CONF_ADDRESS, CONF_NAME # Already correct, but ensuring it's from here
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, MANUFACTURER, CONF_ADDRESS, CONF_NAME
+from .const import DOMAIN, MANUFACTURER
 from .ble_manager import BookooBLEManager
 from .device import BookooDevice
 from .sensor import BookooDataUpdateCoordinator
@@ -51,6 +51,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Fetch initial data - coordinator will use bookoo_device which gets notifications
     await coordinator.async_config_entry_first_refresh()
+
+    # Apply settings, prioritizing options, then data
+    # Defaults from constants.py are used in config_flow if not set by user initially
+    current_config = {**entry.data, **entry.options}
+
+    beep_level = current_config.get("beep_level")
+    auto_off_minutes = current_config.get("auto_off_minutes")
+    flow_smoothing = current_config.get("flow_smoothing")
+
+    if beep_level is not None:
+        _LOGGER.debug("Applying initial beep level: %s", beep_level)
+        await bookoo_device.async_set_beep_level(beep_level)
+    if auto_off_minutes is not None:
+        _LOGGER.debug("Applying initial auto-off minutes: %s", auto_off_minutes)
+        await bookoo_device.async_set_auto_off_minutes(auto_off_minutes)
+    if flow_smoothing is not None:
+        _LOGGER.debug("Applying initial flow smoothing: %s", flow_smoothing)
+        await bookoo_device.async_set_flow_smoothing(flow_smoothing)
     
     # Store coordinator
     hass.data[DOMAIN][entry.entry_id] = coordinator

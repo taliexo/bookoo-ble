@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, Callable
 
 from .ble_manager import BookooBLEManager
 from .constants import (
+    MSG_TYPE_TIMER_STATUS,
     CMD_TARE,
     CMD_START_TIMER,
     CMD_STOP_TIMER,
@@ -41,6 +42,7 @@ class BookooDevice:
         self.timer_ms: int = 0
         self.battery_percent: int = 0
         self.is_stable: bool = False # Placeholder, needs actual logic if available
+        self.is_tare_active: bool = False # Placeholder for tare active state
         self.beep_level: int = 0 # Can be updated from notifications or options flow
         self.auto_off_minutes: int = 0 # Can be updated
         self.flow_smoothing_enabled: bool = False # Can be updated
@@ -64,6 +66,11 @@ class BookooDevice:
                 self.flow_smoothing_enabled = parsed_data.get(ATTR_FLOW_SMOOTHING, self.flow_smoothing_enabled)
             elif parsed_data.get("message_type") == "status":
                 self.timer_status = parsed_data.get("timer_status", self.timer_status)
+            # Update tare_active and is_stable from weight messages if they exist
+            if ATTR_TARE_ACTIVE in parsed_data:
+                 self.is_tare_active = parsed_data[ATTR_TARE_ACTIVE]
+            if ATTR_STABLE in parsed_data:
+                 self.is_stable = parsed_data[ATTR_STABLE]
             
             self._notification_callback(parsed_data)
 
@@ -155,6 +162,7 @@ class BookooDevice:
         # For now, we'll assume it's not part of this specific 0x0B message directly
         # or needs to be inferred from weight changes over time.
         is_stable = False # Placeholder, update if logic is found
+        tare_active = False # Placeholder, update if logic is found
 
         return {
             ATTR_WEIGHT: weight_g,
@@ -162,7 +170,8 @@ class BookooDevice:
             ATTR_TIMER: format_timer(timer_ms), # Formatted for sensor
             "raw_timer_ms": timer_ms, # Raw for internal state/logic
             ATTR_BATTERY_LEVEL: battery_percent,
-            ATTR_STABLE: is_stable, 
+            ATTR_STABLE: is_stable,
+            ATTR_TARE_ACTIVE: tare_active, # Add tare_active placeholder
             ATTR_BEEP_LEVEL: buzzer_gear,
             ATTR_AUTO_OFF_MINUTES: standby_minutes,
             ATTR_FLOW_SMOOTHING: flow_smoothing,
@@ -228,8 +237,8 @@ class BookooDevice:
 
         if msg_identifier == MSG_TYPE_WEIGHT: # 0x0B
             return self._parse_weight_notification(data)
-        elif data[0] == 0x03 and msg_identifier == 0x0D: # Specific timer status message (product 0x03, data[1] is length 0x0D)
-            return self._parse_status_notification(data, expected_identifier_byte=0x0D)
+        elif data[0] == 0x03 and msg_identifier == MSG_TYPE_TIMER_STATUS: # Specific timer status message (product 0x03, data[1] is type/length 0x0D)
+            return self._parse_status_notification(data, expected_identifier_byte=MSG_TYPE_TIMER_STATUS)
         
         _LOGGER.debug("Unknown or unhandled message type/identifier: %02x, data: %s", msg_identifier, data.hex())
         # Optionally, try a more generic parse or log more details
