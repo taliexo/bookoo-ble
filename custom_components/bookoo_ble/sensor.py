@@ -19,8 +19,8 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.const import (
     PERCENTAGE,
-    MASS_GRAMS,
     TIME_MILLISECONDS,
+    UnitOfMass, # Added UnitOfMass
 )
 
 from .constants import (
@@ -53,7 +53,7 @@ SENSOR_DESCRIPTIONS = [
     SensorEntityDescription(
         key=ATTR_WEIGHT,
         name="Weight",
-        native_unit_of_measurement=MASS_GRAMS,
+        native_unit_of_measurement=UnitOfMass.GRAMS,
         device_class=SensorDeviceClass.WEIGHT,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:weight-gram",
