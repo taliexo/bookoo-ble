@@ -23,7 +23,7 @@ from homeassistant.const import (
     TIME_MILLISECONDS,
 )
 
-from .const import (
+from .constants import (
     DOMAIN,
     MANUFACTURER,
     ATTR_WEIGHT,
