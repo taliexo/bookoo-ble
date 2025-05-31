@@ -195,8 +195,6 @@ class BookooBLEManager:
             _LOGGER.debug("Stopped notifications for status updates on %s", CHAR_COMMAND_UUID)
         except Exception as ex:
             _LOGGER.debug("Error stopping notifications for %s: %s", CHAR_COMMAND_UUID, ex)
-        except Exception as ex:
-            _LOGGER.debug("Error stopping notifications: %s", ex)
 
     def _notification_handler(self, sender: int, data: bytes) -> None:
         """Handle notification from device."""

@@ -5,7 +5,7 @@ import pytest
 from custom_components.bookoo_ble.device import BookooDevice
 from custom_components.bookoo_ble.ble_manager import BookooBLEManager
 from custom_components.bookoo_ble.helpers import generate_checksum_byte, validate_checksum # For test data setup
-from custom_components.bookoo_ble.constants import (
+from custom_components.bookoo_ble.const import (
     MSG_TYPE_WEIGHT,
     ATTR_WEIGHT,
     ATTR_FLOW_RATE,
