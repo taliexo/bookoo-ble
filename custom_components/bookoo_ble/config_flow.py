@@ -12,7 +12,7 @@ from homeassistant.helpers.selector import selector
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 
-from .constants import (
+from .const import (
     DOMAIN,
     DEVICE_NAME_PREFIX,
     SERVICE_UUID,

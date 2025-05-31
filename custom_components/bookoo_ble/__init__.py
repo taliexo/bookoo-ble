@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .constants import DOMAIN, MANUFACTURER
+from .const import DOMAIN, MANUFACTURER
 from .ble_manager import BookooBLEManager
 from .device import BookooDevice
 from .sensor import BookooDataUpdateCoordinator

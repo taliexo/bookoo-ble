@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers import config_validation as cv
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 
-from .constants import (
+from .const import (
     DOMAIN,
     CMD_TARE,
     CMD_START_TIMER,
