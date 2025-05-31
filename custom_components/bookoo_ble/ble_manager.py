@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta
 
-from .constants import (
+from .const import (
     DEVICE_NAME_PREFIX,
     SERVICE_UUID,
     CHAR_COMMAND_UUID,

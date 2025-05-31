@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, Optional, Callable
 
 from .ble_manager import BookooBLEManager
-from .constants import (
+from .const import (
     MSG_TYPE_TIMER_STATUS,
     CMD_TARE,
     CMD_START_TIMER,
