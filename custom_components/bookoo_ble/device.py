@@ -97,7 +97,7 @@ class BookooDevice:
 
     async def async_tare_and_start_timer(self) -> bool:
         """Send tare and start timer command."""
-        return await self.ble_manager.async_write_command(CMD_TARE_AND_START)
+        return await self.ble_manager.async_write_command(CMD_TARE_AND_START_TIMER)
 
     async def async_set_beep_level(self, level: int) -> bool:
         """Send set beep level command."""
