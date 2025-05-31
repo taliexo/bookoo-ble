@@ -11,8 +11,8 @@ MANUFACTURER: Final = "Bookoo Coffee"
 
 # BLE Service and Characteristic UUIDs
 SERVICE_UUID: Final = "00000FFE-0000-1000-8000-00805F9B34FB"
-CHAR_COMMAND_UUID: Final = "0000FF12-0000-1000-8000-00805F9B34FB"  # Command & Weight data notifications
-CHAR_WEIGHT_UUID: Final = "0000FF11-0000-1000-8000-00805F9B34FB"   # Alternative weight data (not commonly used)
+CHAR_COMMAND_UUID: Final = "0000FF12-0000-1000-8000-00805F9B34FB"  # Command characteristic
+CHAR_WEIGHT_UUID: Final = "0000FF11-0000-1000-8000-00805F9B34FB"   # Weight, Timer, and Status data notifications (Primary)
 CHAR_NOTIFY_DESCRIPTOR: Final = "00002902-0000-1000-8000-00805F9B34FB"
 
 # Nordic DFU Service (for firmware updates, not used in normal operation)
@@ -20,9 +20,8 @@ DFU_SERVICE_UUID: Final = "0000FE59-0000-1000-8000-00805F9B34FB"
 DFU_CHAR_UUID: Final = "8EC90003-F315-4F60-9FB8-838830DAEA50"
 
 # Message types (first byte of notification)
-MSG_TYPE_COMMAND: Final = 0x0A
-MSG_TYPE_WEIGHT: Final = 0x0B
-MSG_TYPE_STATUS: Final = 0x03  # Seen in captures
+MSG_TYPE_COMMAND: Final = 0x0A # This is likely for commands sent TO the device, or responses.
+MSG_TYPE_WEIGHT: Final = 0x0B # This is data[1] for weight/sensor notifications FROM the device.
 
 # Commands
 CMD_TARE: Final = bytes([0x03, 0x0A, 0x01, 0x00, 0x00, 0x08])

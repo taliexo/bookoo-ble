@@ -12,7 +12,6 @@ from .constants import (
     cmd_set_auto_off,
     cmd_set_flow_smoothing,
     MSG_TYPE_WEIGHT,
-    MSG_TYPE_STATUS,
     ATTR_WEIGHT,
     ATTR_FLOW_RATE,
     ATTR_TIMER,
@@ -234,8 +233,6 @@ class BookooDevice:
             return self._parse_weight_notification(data)
         elif data[0] == 0x03 and msg_identifier == 0x0D: # Specific timer status message (product 0x03, data[1] is length 0x0D)
             return self._parse_status_notification(data, expected_identifier_byte=0x0D)
-        elif msg_identifier == MSG_TYPE_STATUS: # Generic status message (data[1] is type 0x03)
-             return self._parse_status_notification(data, expected_identifier_byte=MSG_TYPE_STATUS)
         
         _LOGGER.debug("Unknown or unhandled message type/identifier: %02x, data: %s", msg_identifier, data.hex())
         # Optionally, try a more generic parse or log more details

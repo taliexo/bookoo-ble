@@ -15,6 +15,7 @@ from .constants import (
     DEVICE_NAME_PREFIX,
     SERVICE_UUID,
     CHAR_COMMAND_UUID,
+    CHAR_WEIGHT_UUID,  # Added for sensor data notifications
     CHAR_NOTIFY_DESCRIPTOR,
     RECONNECT_INTERVAL_SECONDS,
     SCAN_INTERVAL_SECONDS,
@@ -156,11 +157,24 @@ class BookooBLEManager:
         
         try:
             # Subscribe to notifications
-            await self.client.start_notify(
-                CHAR_COMMAND_UUID,
-                self._notification_handler
-            )
-            _LOGGER.debug("Started notifications for %s", CHAR_COMMAND_UUID)
+            try:
+                await self.client.start_notify(
+                    CHAR_WEIGHT_UUID,
+                    self._notification_handler
+                )
+                _LOGGER.debug("Started notifications for sensor data on %s", CHAR_WEIGHT_UUID)
+            except Exception as ex:
+                _LOGGER.error("Failed to start notifications for %s: %s", CHAR_WEIGHT_UUID, ex)
+            
+            try:
+                await self.client.start_notify(
+                    CHAR_COMMAND_UUID, # For status updates like timer start/stop
+                    self._notification_handler
+                )
+                _LOGGER.debug("Started notifications for status updates on %s", CHAR_COMMAND_UUID)
+            except Exception as ex:
+                _LOGGER.error("Failed to start notifications for %s: %s", CHAR_COMMAND_UUID, ex)
+            # Note: If one fails, the other might still succeed. Consider overall success criteria.
             
         except Exception as ex:
             _LOGGER.error("Failed to start notifications: %s", ex)
@@ -171,8 +185,16 @@ class BookooBLEManager:
             return
         
         try:
+            await self.client.stop_notify(CHAR_WEIGHT_UUID)
+            _LOGGER.debug("Stopped notifications for sensor data on %s", CHAR_WEIGHT_UUID)
+        except Exception as ex:
+            _LOGGER.debug("Error stopping notifications for %s: %s", CHAR_WEIGHT_UUID, ex)
+        
+        try:
             await self.client.stop_notify(CHAR_COMMAND_UUID)
-            _LOGGER.debug("Stopped notifications")
+            _LOGGER.debug("Stopped notifications for status updates on %s", CHAR_COMMAND_UUID)
+        except Exception as ex:
+            _LOGGER.debug("Error stopping notifications for %s: %s", CHAR_COMMAND_UUID, ex)
         except Exception as ex:
             _LOGGER.debug("Error stopping notifications: %s", ex)
 
