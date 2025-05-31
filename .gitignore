@@ -1,0 +1,4 @@
+/.venv
+/psvenv
+__pycache__/
+project_plan.md

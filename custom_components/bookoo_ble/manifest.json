@@ -1,0 +1,12 @@
+{
+  "domain": "bookoo_ble",
+  "name": "Bookoo BLE",
+  "documentation": "https://github.com/taliexo/bookoo-ble",
+  "issue_tracker": "https://github.com/taliexo/bookoo-ble/issues",
+  "codeowners": ["@taliexo"],
+  "requirements": [],
+  "dependencies": ["bluetooth"],
+  "version": "0.1.0",
+  "iot_class": "local_polling",
+  "config_flow": true
+}

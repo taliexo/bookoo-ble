@@ -1,0 +1,90 @@
+[
+  {
+    "name": "BOOKOO_SC 637757",
+    "address": "E94530B2-E56D-B81A-FBF8-BF1285501E0A",
+    "rssi": -67,
+    "metadata": {
+      "uuids": [
+        "00000ffe-0000-1000-8000-00805f9b34fb"
+      ],
+      "manufacturer_data": {}
+    },
+    "timestamp": "2025-05-29T09:22:56.695124",
+    "peripheral_info": {
+      "identifier": "<native-selector identifier of <CBPeripheral: 0x1064ed190, identifier = E94530B2-E56D-B81A-FBF8-BF1285501E0A, name = BOOKOO_SC 637757, mtu = 0, state = disconnected>>",
+      "state": "<native-selector state of <CBPeripheral: 0x1064ed190, identifier = E94530B2-E56D-B81A-FBF8-BF1285501E0A, name = BOOKOO_SC 637757, mtu = 0, state = disconnected>>",
+      "mtu": null
+    },
+    "service_info": [
+      {
+        "uuid": "00000ffe-0000-1000-8000-00805f9b34fb"
+      }
+    ],
+    "manufacturer_info": [],
+    "characteristics": [
+      {
+        "uuid": "00000ffe-0000-1000-8000-00805f9b34fb",
+        "description": "Vendor specific",
+        "standard_name": null,
+        "characteristics": [
+          {
+            "uuid": "0000ff12-0000-1000-8000-00805f9b34fb",
+            "description": "Vendor specific",
+            "standard_name": null,
+            "properties": [
+              "read",
+              "write",
+              "notify"
+            ],
+            "descriptors": [
+              {
+                "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+                "handle": 17
+              }
+            ],
+            "value": "bytearray(b'')"
+          },
+          {
+            "uuid": "0000ff11-0000-1000-8000-00805f9b34fb",
+            "description": "Vendor specific",
+            "standard_name": null,
+            "properties": [
+              "read",
+              "write",
+              "notify"
+            ],
+            "descriptors": [
+              {
+                "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+                "handle": 20
+              }
+            ],
+            "value": "bytearray(b'')"
+          }
+        ]
+      },
+      {
+        "uuid": "0000fe59-0000-1000-8000-00805f9b34fb",
+        "description": "Nordic Semiconductor ASA",
+        "standard_name": null,
+        "characteristics": [
+          {
+            "uuid": "8ec90003-f315-4f60-9fb8-838830daea50",
+            "description": "Buttonless DFU",
+            "standard_name": null,
+            "properties": [
+              "write",
+              "indicate"
+            ],
+            "descriptors": [
+              {
+                "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+                "handle": 24
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

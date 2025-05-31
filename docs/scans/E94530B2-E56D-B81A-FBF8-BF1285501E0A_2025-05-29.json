@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2025-05-29 14:42:13",
+    "sender": "0000ff12-0000-1000-8000-00805f9b34fb (Handle: 15): Vendor specific",
+    "data": "030d01000000000000000000000000000000000f",
+    "action": "AUTO_TIMER_START"
+  },
+  {
+    "timestamp": "2025-05-29 14:42:25",
+    "sender": "0000ff12-0000-1000-8000-00805f9b34fb (Handle: 15): Vendor specific",
+    "data": "030d00000000000000000000000000000000000e",
+    "action": "AUTO_TIMER_STOP"
+  }
+]
