@@ -18,14 +18,13 @@ This integration allows you to monitor your Bookoo smart coffee scale via Blueto
 
 ## Supported Devices
 
-- Bookoo Scale (BOOKOO_SC series)
-- Bookoo Themis
+- Bookoo Themis Mini-Scale
 
 ## Requirements
 
 - Home Assistant 2024.1.0 or newer
 - Bluetooth adapter accessible to Home Assistant
-- Bookoo scale within Bluetooth range
+- Bookoo Themis Mini-Scale within Bluetooth range (consider using an ESP32 Bluetooth proxy if needed)
 
 ## Installation
 
