@@ -1,212 +1,227 @@
 """Sensor platform for Bookoo BLE integration."""
 import logging
-from typing import Any, Dict, Optional, Callable
-from datetime import timedelta
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
 
+from homeassistant.components.bluetooth.passive_update_processor import (
+    PassiveBluetoothDataUpdate,
+    PassiveBluetoothEntityKey,
+    PassiveBluetoothProcessorCoordinator,
+    PassiveBluetoothProcessorEntity,
+)
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
-    SensorDeviceClass,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
 from homeassistant.const import (
     PERCENTAGE,
+    UnitOfMass,
+    UnitOfTime,
 )
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DOMAIN,
-    MANUFACTURER,
-    ATTR_WEIGHT,
-    ATTR_FLOW_RATE,
-    ATTR_TIMER,
+    ATTR_AUTO_OFF_MINUTES,
     ATTR_BATTERY_LEVEL,
+    ATTR_BEEP_LEVEL,
+    ATTR_FLOW_RATE,
+    ATTR_FLOW_SMOOTHING,
     ATTR_STABLE,
     ATTR_TARE_ACTIVE,
-    ATTR_FLOW_SMOOTHING,
-    ATTR_BEEP_LEVEL,
-    ATTR_AUTO_OFF_MINUTES,
-    UNIT_GRAMS,
+    ATTR_TIMER,
+    ATTR_WEIGHT,
+    DOMAIN,
     UNIT_GRAMS_PER_SECOND,
-    UNIT_MILLISECONDS,
-    UNIT_PERCENT,
-    UNIT_MINUTES,
-    NOTIFICATION_TIMEOUT_SECONDS,
 )
-from .helpers import format_timer # parse_notification is now in BookooDevice
-# from .ble_manager import BookooBLEManager # No longer directly used by coordinator
-from .device import BookooDevice
+from .coordinator import BookooDeviceCoordinator
+from .models import BookooBluetoothDeviceData
 
 _LOGGER = logging.getLogger(__name__)
 
 
+@dataclass
+class BookooSensorEntityDescription(SensorEntityDescription):
+    """Sensor entity description for Bookoo sensors."""
+
+    value_fn: Callable[[BookooBluetoothDeviceData], Any] = None
+
+
 SENSOR_DESCRIPTIONS = [
-    SensorEntityDescription(
+    BookooSensorEntityDescription(
         key=ATTR_WEIGHT,
         name="Weight",
-        native_unit_of_measurement="g",
+        native_unit_of_measurement=UnitOfMass.GRAMS,
         device_class=SensorDeviceClass.WEIGHT,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:weight-gram",
+        value_fn=lambda device: device.data.weight if device.data else None,
     ),
-    SensorEntityDescription(
+    BookooSensorEntityDescription(
         key=ATTR_FLOW_RATE,
         name="Flow Rate",
         native_unit_of_measurement=UNIT_GRAMS_PER_SECOND,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:water-outline",
+        value_fn=lambda device: device.data.flow_rate if device.data else None,
     ),
-    SensorEntityDescription(
+    BookooSensorEntityDescription(
         key=ATTR_TIMER,
         name="Timer",
         icon="mdi:timer-outline",
+        value_fn=lambda device: device.data.timer if device.data else None,
     ),
-    SensorEntityDescription(
+    BookooSensorEntityDescription(
         key=ATTR_BATTERY_LEVEL,
         name="Battery Level",
         native_unit_of_measurement=PERCENTAGE,
         device_class=SensorDeviceClass.BATTERY,
         state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda device: device.data.battery_level if device.data else None,
+    ),
+    BookooSensorEntityDescription(
+        key=ATTR_BEEP_LEVEL,
+        name="Beep Level",
+        icon="mdi:volume-high",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda device: device.data.beep_level if device.data else None,
+    ),
+    BookooSensorEntityDescription(
+        key=ATTR_AUTO_OFF_MINUTES,
+        name="Auto Off Time",
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        icon="mdi:timer-off-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda device: device.data.auto_off_minutes if device.data else None,
     ),
 ]
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Bookoo BLE sensors."""
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]
-    
+    """Set up Bookoo BLE sensors based on a config entry."""
+    coordinators = hass.data[DOMAIN][entry.entry_id]
+    device_coordinator = coordinators["device_coordinator"]
+    passive_coordinator = coordinators["passive_coordinator"]
+
+    # Create a list to hold all entities
     entities = []
-    for description in SENSOR_DESCRIPTIONS:
-        entities.append(BookooSensor(coordinator, description, config_entry))
     
+    # Create both active and passive entities
+    for description in SENSOR_DESCRIPTIONS:
+        # Active entities (device state polling)
+        if description.key in [ATTR_WEIGHT, ATTR_FLOW_RATE, ATTR_TIMER, ATTR_BATTERY_LEVEL, ATTR_BEEP_LEVEL, ATTR_AUTO_OFF_MINUTES]:
+            entities.append(
+                BookooActiveSensor(
+                    device_coordinator,
+                    description,
+                    entry.entry_id,
+                )
+            )
+    
+    # Add passive entities for attributes updated by notifications
+    processor = passive_coordinator.processor
+    entities.extend(
+        BookooPassiveSensor(
+            entry.entry_id,
+            passive_coordinator,
+            PassiveBluetoothEntityKey(key, device_coordinator.device.address),
+        )
+        for key in ["weight", "flow_rate", "timer", "battery_level", "timer_status"]
+    )
+
     async_add_entities(entities)
 
 
-class BookooDataUpdateCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching Bookoo data."""
+class BookooActiveSensor(SensorEntity):
+    """Representation of a Bookoo BLE sensor that actively polls the device."""
+
+    entity_description: BookooSensorEntityDescription
 
     def __init__(
         self,
-        hass: HomeAssistant,
-        bookoo_device: BookooDevice, # Changed from ble_manager
-        config_entry: ConfigEntry,
-    ) -> None:
-        """Initialize the coordinator."""
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_{config_entry.entry_id}",
-            update_interval=timedelta(seconds=NOTIFICATION_TIMEOUT_SECONDS),
-        )
-        self.bookoo_device = bookoo_device # Store BookooDevice instance
-        self.config_entry = config_entry
-        self._device_name = config_entry.data.get("name", "Bookoo Scale")
-        self._device_address = config_entry.data["address"]
-        self._last_notification_data: Optional[Dict[str, Any]] = None
-        
-        # Set up notification callback on the BookooDevice instance
-        self.bookoo_device.set_external_notification_callback(self._handle_notification)
-
-    async def _async_update_data(self) -> Dict[str, Any]:
-        """Update data from device."""
-        # If we have recent notification data, use it
-        if self._last_notification_data:
-            data = self._last_notification_data
-            self._last_notification_data = None
-            return data
-        
-        # Otherwise return the last known data or empty dict
-        return self.data or {}
-
-    @callback
-    def _handle_notification(self, parsed_data: Dict[str, Any]) -> None:
-        """Handle parsed notification data from BookooDevice."""
-        # The data is already parsed by BookooDevice._internal_notification_handler
-        if not parsed_data:
-            return
-        
-        # We can directly use parsed_data, or re-construct if needed for _last_notification_data structure
-        # For simplicity, let's assume BookooDevice provides data in the expected format
-        # or we adapt here slightly.
-        
-        # The BookooDevice already updates its internal state.
-        # The coordinator's role is to hold the data for HA entities.
-        # We just need to ensure the format matches what sensors expect.
-
-        # If BookooDevice._parse_weight_notification and _parse_status_notification
-        # already structure the dict as needed by sensors (including formatted timer),
-        # we can largely pass it through.
-
-        self._last_notification_data = parsed_data
-        
-        # Trigger coordinator update
-        self.async_set_updated_data(self._last_notification_data or {})
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._device_address)},
-            name=self._device_name,
-            manufacturer=MANUFACTURER,
-            model="Bookoo Scale",
-            sw_version=None,  # Could be retrieved from device
-        )
-
-
-class BookooSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a Bookoo BLE sensor."""
-
-    def __init__(
-        self,
-        coordinator: BookooDataUpdateCoordinator,
-        description: SensorEntityDescription,
-        config_entry: ConfigEntry,
+        coordinator: BookooDeviceCoordinator,
+        description: BookooSensorEntityDescription,
+        entry_id: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
         self.entity_description = description
-        self._attr_unique_id = f"{config_entry.entry_id}_{description.key}"
-        self._attr_device_info = coordinator.device_info
+        self._coordinator = coordinator
+        self._entry_id = entry_id
+        
+        # Set the unique ID using the device address and entity key
+        self._attr_unique_id = f"{coordinator.device.address}_{description.key}"
+        
+        # Link to the device
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.device.address)},
+            "name": coordinator.device.device_name,
+            "manufacturer": coordinator.device.manufacturer,
+            "model": coordinator.device.model,
+        }
+        
+        # Entity category is diagnostic for these sensors
         self._attr_has_entity_name = True
 
     @property
     def native_value(self) -> Any:
-        """Return the sensor value."""
-        return self.coordinator.data.get(self.entity_description.key)
+        """Return the value of the sensor."""
+        if self.entity_description.value_fn:
+            return self.entity_description.value_fn(self._coordinator.device)
+        return None
 
     @property
     def available(self) -> bool:
-        """Return True if entity is available."""
-        return self.coordinator.last_update_success and self.coordinator.bookoo_device.ble_manager.is_connected
+        """Return if the entity is available."""
+        # Consider the entity available if the coordinator is connected
+        return self._coordinator._client is not None and self._coordinator._client.is_connected
 
-    @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
-        """Return extra state attributes."""
-        attributes = {}
+
+class BookooPassiveSensor(PassiveBluetoothProcessorEntity, SensorEntity):
+    """Representation of a Bookoo BLE sensor updated passively by notifications."""
+
+    def __init__(
+        self,
+        entry_id: str,
+        coordinator: PassiveBluetoothProcessorCoordinator,
+        entity_key: PassiveBluetoothEntityKey,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entity_key)
         
-        # Add all relevant attributes based on sensor type
-        if self.entity_description.key == ATTR_WEIGHT:
-            attributes[ATTR_STABLE] = self.coordinator.data.get(ATTR_STABLE, False)
-            attributes[ATTR_TARE_ACTIVE] = self.coordinator.data.get(ATTR_TARE_ACTIVE, False)
-        elif self.entity_description.key == ATTR_FLOW_RATE:
-            attributes[ATTR_FLOW_SMOOTHING] = self.coordinator.data.get(ATTR_FLOW_SMOOTHING, False)
-        elif self.entity_description.key == ATTR_TIMER:
-            attributes["timer_ms"] = self.coordinator.data.get("raw_timer_ms", 0)
-            attributes["timer_status"] = self.coordinator.data.get("timer_status", "unknown")
-        elif self.entity_description.key == ATTR_BATTERY_LEVEL:
-            attributes[ATTR_AUTO_OFF_MINUTES] = self.coordinator.data.get(ATTR_AUTO_OFF_MINUTES, 0)
-            attributes[ATTR_BEEP_LEVEL] = self.coordinator.data.get(ATTR_BEEP_LEVEL, 0)
+        # Set the entity name based on the key
+        self._attr_name = entity_key.key.replace("_", " ").title()
         
-        return attributes
+        # Set appropriate units and device class
+        if entity_key.key == ATTR_WEIGHT:
+            self._attr_native_unit_of_measurement = UnitOfMass.GRAMS
+            self._attr_device_class = SensorDeviceClass.WEIGHT
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_icon = "mdi:weight-gram"
+        elif entity_key.key == ATTR_FLOW_RATE:
+            self._attr_native_unit_of_measurement = UNIT_GRAMS_PER_SECOND
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_icon = "mdi:water-outline"
+        elif entity_key.key == ATTR_TIMER:
+            self._attr_icon = "mdi:timer-outline"
+        elif entity_key.key == ATTR_BATTERY_LEVEL:
+            self._attr_native_unit_of_measurement = PERCENTAGE
+            self._attr_device_class = SensorDeviceClass.BATTERY
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+        
+        # Entity category is diagnostic for these sensors
+        self._attr_has_entity_name = True
+
+    @callback
+    def _async_update_from_processor_data(
+        self, update: PassiveBluetoothDataUpdate
+    ) -> None:
+        """Update the entity from the processor data."""
+        self._attr_native_value = update.entity_data.get(self.entity_key)
+        super()._async_update_from_processor_data(update)

@@ -1,22 +1,25 @@
 """The Bookoo BLE integration."""
-import asyncio
 import logging
+from typing import Any, Dict, Optional
 
+from homeassistant.components.bluetooth import BluetoothScanningMode
+from homeassistant.components.bluetooth.passive_update_processor import (
+    PassiveBluetoothProcessorCoordinator,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ADDRESS, CONF_NAME # Already correct, but ensuring it's from here
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.const import CONF_ADDRESS, CONF_NAME, Platform
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER
-from .ble_manager import BookooBLEManager
-from .device import BookooDevice
-from .sensor import BookooDataUpdateCoordinator
+from .coordinator import BookooDeviceCoordinator, BookooPassiveBluetoothDataProcessor
+from .models import BookooBluetoothDeviceData
 from .services import async_setup_services, async_unload_services
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor"]
+PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.SWITCH, Platform.BUTTON]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -34,54 +37,74 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     name = entry.data[CONF_NAME]
     
     _LOGGER.debug("Setting up Bookoo BLE for %s (%s)", name, address)
-    
-    # Create BLE manager
-    ble_manager = BookooBLEManager(hass, address)
-    
-    # Create BookooDevice instance
-    bookoo_device = BookooDevice(ble_manager, name)
 
-    # Create coordinator, passing the BookooDevice instance
-    coordinator = BookooDataUpdateCoordinator(hass, bookoo_device, entry)
-    coordinator.bookoo_device = bookoo_device # Store device on coordinator for services
+    # Create a device data object with basic information
+    # This will be updated when we receive notifications
+    device_data = BookooBluetoothDeviceData(
+        address=address,
+        device_name=name,
+        model="Bookoo Mini Scale",
+        service_info=None,  # Will be set when notifications are received
+        data=None,  # Will be set when notifications are received
+        manufacturer=MANUFACTURER,
+    )
     
-    # Start BLE connection (managed by ble_manager, started by BookooDevice if needed or implicitly by coordinator)
-    if not await ble_manager.async_start(): # ble_manager is still started here
-        raise ConfigEntryNotReady(f"Unable to connect to Bookoo device {address}")
+    # Create a passive update processor
+    ble_processor = BookooPassiveBluetoothDataProcessor(
+        lambda service_info, update: None,  # Will be set by the coordinator
+    )
     
-    # Fetch initial data - coordinator will use bookoo_device which gets notifications
-    await coordinator.async_config_entry_first_refresh()
-
-    # Apply settings, prioritizing options, then data
-    # Defaults from constants.py are used in config_flow if not set by user initially
-    current_config = {**entry.data, **entry.options}
-
-    beep_level = current_config.get("beep_level")
-    auto_off_minutes = current_config.get("auto_off_minutes")
-    flow_smoothing = current_config.get("flow_smoothing")
-
-    if beep_level is not None:
-        _LOGGER.debug("Applying initial beep level: %s", beep_level)
-        await bookoo_device.async_set_beep_level(beep_level)
-    if auto_off_minutes is not None:
-        _LOGGER.debug("Applying initial auto-off minutes: %s", auto_off_minutes)
-        await bookoo_device.async_set_auto_off_minutes(auto_off_minutes)
-    if flow_smoothing is not None:
-        _LOGGER.debug("Applying initial flow smoothing: %s", flow_smoothing)
-        await bookoo_device.async_set_flow_smoothing(flow_smoothing)
+    # Create the passive update coordinator
+    passive_coordinator = PassiveBluetoothProcessorCoordinator(
+        hass,
+        _LOGGER,
+        address=address,
+        mode=BluetoothScanningMode.ACTIVE,
+        update_processor=ble_processor,
+    )
     
-    # Store coordinator
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    # Create the device coordinator
+    device_coordinator = BookooDeviceCoordinator(
+        hass, device_data, passive_coordinator
+    )
     
-    # Register device
+    # Connect to the device
+    if not await device_coordinator.connect_and_setup():
+        # We don't raise ConfigEntryNotReady here because the device may be offline
+        # temporarily. The Bluetooth integration will keep trying to connect.
+        _LOGGER.warning("Could not connect to Bookoo device %s (%s)", name, address)
+    
+    # Store coordinators in hass.data
+    hass.data[DOMAIN][entry.entry_id] = {
+        "device_coordinator": device_coordinator,
+        "passive_coordinator": passive_coordinator,
+    }
+    
+    # Register the device in the device registry
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, address)},
         manufacturer=MANUFACTURER,
         name=name,
-        model="Bookoo Scale",
+        model="Bookoo Mini Scale",
     )
+    
+    # Apply settings from options or config data
+    current_config = {**entry.data, **entry.options}
+    beep_level = current_config.get("beep_level")
+    auto_off_minutes = current_config.get("auto_off_minutes")
+    flow_smoothing = current_config.get("flow_smoothing")
+
+    if beep_level is not None:
+        _LOGGER.debug("Applying initial beep level: %s", beep_level)
+        await device_coordinator.async_set_beep_level(beep_level)
+    if auto_off_minutes is not None:
+        _LOGGER.debug("Applying initial auto-off minutes: %s", auto_off_minutes)
+        await device_coordinator.async_set_auto_off_minutes(auto_off_minutes)
+    if flow_smoothing is not None:
+        _LOGGER.debug("Applying initial flow smoothing: %s", flow_smoothing)
+        await device_coordinator.async_set_flow_smoothing(flow_smoothing)
     
     # Forward entry setup to platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -97,10 +120,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
-    if unload_ok:
-        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        # Stop BLE manager (accessed via coordinator's bookoo_device or directly if preferred)
-        await coordinator.bookoo_device.ble_manager.async_stop()
+    if unload_ok and entry.entry_id in hass.data[DOMAIN]:
+        coordinators = hass.data[DOMAIN].pop(entry.entry_id)
+        device_coordinator = coordinators["device_coordinator"]
+        
+        # Disconnect the device coordinator
+        await device_coordinator.disconnect()
         
         # If this is the last entry, unload services
         if not hass.data[DOMAIN]:
@@ -113,3 +138,35 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry."""
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)
+
+
+class BookooEntity(CoordinatorEntity):
+    """Base class for Bookoo BLE entities."""
+
+    def __init__(
+        self,
+        device_coordinator: BookooDeviceCoordinator,
+        description_key: str,
+    ) -> None:
+        """Initialize the entity."""
+        super().__init__(device_coordinator)
+        self._device_coordinator = device_coordinator
+        self._device = device_coordinator.device
+        self.entity_description_key = description_key
+        
+        # Set the entity's unique ID
+        self._attr_unique_id = f"{self._device.address}_{description_key}"
+        
+        # Link the entity to the device
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, self._device.address)},
+            "name": self._device.device_name,
+            "manufacturer": MANUFACTURER,
+            "model": self._device.model,
+        }
+        
+    @property
+    def available(self) -> bool:
+        """Return if the entity is available."""
+        # The coordinator will handle device availability
+        return self._device_coordinator.last_update_success

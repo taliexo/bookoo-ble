@@ -5,8 +5,16 @@
   "issue_tracker": "https://github.com/taliexo/bookoo-ble/issues",
   "codeowners": ["@taliexo"],
   "requirements": [],
-  "dependencies": ["bluetooth_adapters"],
-  "version": "0.4.0",
+  "dependencies": ["bluetooth"],
+  "version": "0.5.0",
   "iot_class": "local_push",
-  "config_flow": true
+  "config_flow": true,
+  "bluetooth": [
+    {
+      "local_name": "BOOKOO_SC*"
+    },
+    {
+      "service_uuid": "00000FFE-0000-1000-8000-00805F9B34FB"
+    }
+  ]
 }
