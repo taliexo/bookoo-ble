@@ -1,5 +1,6 @@
 """Constants for the Bookoo BLE integration."""
 from typing import Final
+from .helpers import generate_checksum_byte
 
 # Domain
 DOMAIN: Final = "bookoo_ble"
@@ -33,21 +34,24 @@ CMD_TARE_AND_START: Final = bytes([0x03, 0x0A, 0x07, 0x00, 0x00, 0x00])  # Recom
 # Beep level commands (0-5, 0 = off)
 def cmd_set_beep(level: int) -> bytes:
     """Create command to set beep level (0-5)."""
-    checksum = 0x03 ^ 0x0A ^ 0x02 ^ level ^ 0x00
-    return bytes([0x03, 0x0A, 0x02, level, 0x00, checksum])
+    payload = bytes([0x03, 0x0A, 0x02, level, 0x00])
+    checksum = generate_checksum_byte(payload)
+    return payload + bytes([checksum])
 
 # Auto-off duration commands (1-30 minutes)
 def cmd_set_auto_off(minutes: int) -> bytes:
     """Create command to set auto-off duration (1-30 minutes)."""
-    checksum = 0x03 ^ 0x0A ^ 0x03 ^ minutes ^ 0x00
-    return bytes([0x03, 0x0A, 0x03, minutes, 0x00, checksum])
+    payload = bytes([0x03, 0x0A, 0x03, minutes, 0x00])
+    checksum = generate_checksum_byte(payload)
+    return payload + bytes([checksum])
 
 # Flow smoothing command (0 = off, 1 = on)
 def cmd_set_flow_smoothing(enabled: bool) -> bytes:
     """Create command to enable/disable flow smoothing."""
     value = 0x01 if enabled else 0x00
-    checksum = 0x03 ^ 0x0A ^ 0x08 ^ value ^ 0x00
-    return bytes([0x03, 0x0A, 0x08, value, 0x00, checksum])
+    payload = bytes([0x03, 0x0A, 0x08, value, 0x00])
+    checksum = generate_checksum_byte(payload)
+    return payload + bytes([checksum])
 
 # Sensor attributes
 ATTR_WEIGHT: Final = "weight"

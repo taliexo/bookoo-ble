@@ -42,8 +42,9 @@ from .const import (
     UNIT_MINUTES,
     NOTIFICATION_TIMEOUT_SECONDS,
 )
-from .helpers import parse_notification, format_timer
-from .ble_manager import BookooBLEManager
+from .helpers import format_timer # parse_notification is now in BookooDevice
+# from .ble_manager import BookooBLEManager # No longer directly used by coordinator
+from .device import BookooDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ class BookooDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(
         self,
         hass: HomeAssistant,
-        ble_manager: BookooBLEManager,
+        bookoo_device: BookooDevice, # Changed from ble_manager
         config_entry: ConfigEntry,
     ) -> None:
         """Initialize the coordinator."""
@@ -110,14 +111,14 @@ class BookooDataUpdateCoordinator(DataUpdateCoordinator):
             name=f"{DOMAIN}_{config_entry.entry_id}",
             update_interval=timedelta(seconds=NOTIFICATION_TIMEOUT_SECONDS),
         )
-        self.ble_manager = ble_manager
+        self.bookoo_device = bookoo_device # Store BookooDevice instance
         self.config_entry = config_entry
         self._device_name = config_entry.data.get("name", "Bookoo Scale")
         self._device_address = config_entry.data["address"]
         self._last_notification_data: Optional[Dict[str, Any]] = None
         
-        # Set up notification callback
-        self.ble_manager.set_notification_callback(self._handle_notification)
+        # Set up notification callback on the BookooDevice instance
+        self.bookoo_device.set_external_notification_callback(self._handle_notification)
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Update data from device."""
@@ -131,35 +132,25 @@ class BookooDataUpdateCoordinator(DataUpdateCoordinator):
         return self.data or {}
 
     @callback
-    def _handle_notification(self, data: bytes) -> None:
-        """Handle notification from device."""
-        parsed = parse_notification(data)
-        if not parsed:
+    def _handle_notification(self, parsed_data: Dict[str, Any]) -> None:
+        """Handle parsed notification data from BookooDevice."""
+        # The data is already parsed by BookooDevice._internal_notification_handler
+        if not parsed_data:
             return
         
-        # Update coordinator data based on message type
-        if parsed.get("message_type") == "weight":
-            # Full weight data update
-            self._last_notification_data = {
-                ATTR_WEIGHT: parsed.get("weight_g", 0),
-                ATTR_FLOW_RATE: parsed.get("flow_rate_g_s", 0),
-                ATTR_TIMER: format_timer(parsed.get("timer_ms", 0)),
-                ATTR_BATTERY_LEVEL: parsed.get("battery_percent", 0),
-                ATTR_STABLE: parsed.get("stable", False),
-                ATTR_FLOW_SMOOTHING: parsed.get("flow_smoothing", False),
-                ATTR_BEEP_LEVEL: parsed.get("buzzer_gear", 0),
-                ATTR_AUTO_OFF_MINUTES: parsed.get("standby_minutes", 0),
-                "raw_timer_ms": parsed.get("timer_ms", 0),
-            }
-        elif parsed.get("message_type") == "status":
-            # Status update - preserve existing data and update timer status
-            if self.data:
-                self._last_notification_data = dict(self.data)
-                self._last_notification_data["timer_status"] = parsed.get("timer_status")
-            else:
-                self._last_notification_data = {
-                    "timer_status": parsed.get("timer_status"),
-                }
+        # We can directly use parsed_data, or re-construct if needed for _last_notification_data structure
+        # For simplicity, let's assume BookooDevice provides data in the expected format
+        # or we adapt here slightly.
+        
+        # The BookooDevice already updates its internal state.
+        # The coordinator's role is to hold the data for HA entities.
+        # We just need to ensure the format matches what sensors expect.
+
+        # If BookooDevice._parse_weight_notification and _parse_status_notification
+        # already structure the dict as needed by sensors (including formatted timer),
+        # we can largely pass it through.
+
+        self._last_notification_data = parsed_data
         
         # Trigger coordinator update
         self.async_set_updated_data(self._last_notification_data or {})

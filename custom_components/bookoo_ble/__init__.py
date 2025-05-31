@@ -8,9 +8,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, MANUFACTURER
+from .const import DOMAIN, MANUFACTURER, CONF_ADDRESS, CONF_NAME
 from .ble_manager import BookooBLEManager
+from .device import BookooDevice
 from .sensor import BookooDataUpdateCoordinator
+from .services import async_setup_services, async_unload_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,6 +22,9 @@ PLATFORMS = ["sensor"]
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Bookoo BLE component."""
     hass.data.setdefault(DOMAIN, {})
+    
+    # Set up services
+    await async_setup_services(hass)
     return True
 
 
@@ -33,14 +38,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create BLE manager
     ble_manager = BookooBLEManager(hass, address)
     
-    # Create coordinator
-    coordinator = BookooDataUpdateCoordinator(hass, ble_manager, entry)
+    # Create BookooDevice instance
+    bookoo_device = BookooDevice(ble_manager, name)
+
+    # Create coordinator, passing the BookooDevice instance
+    coordinator = BookooDataUpdateCoordinator(hass, bookoo_device, entry)
+    coordinator.bookoo_device = bookoo_device # Store device on coordinator for services
     
-    # Start BLE connection
-    if not await ble_manager.async_start():
+    # Start BLE connection (managed by ble_manager, started by BookooDevice if needed or implicitly by coordinator)
+    if not await ble_manager.async_start(): # ble_manager is still started here
         raise ConfigEntryNotReady(f"Unable to connect to Bookoo device {address}")
     
-    # Fetch initial data
+    # Fetch initial data - coordinator will use bookoo_device which gets notifications
     await coordinator.async_config_entry_first_refresh()
     
     # Store coordinator
@@ -72,8 +81,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     if unload_ok:
         coordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        # Stop BLE manager
-        await coordinator.ble_manager.async_stop()
+        # Stop BLE manager (accessed via coordinator's bookoo_device or directly if preferred)
+        await coordinator.bookoo_device.ble_manager.async_stop()
+        
+        # If this is the last entry, unload services
+        if not hass.data[DOMAIN]:
+            await async_unload_services(hass)
     
     return unload_ok
 
