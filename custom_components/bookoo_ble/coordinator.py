@@ -10,6 +10,7 @@ from bleak.backends.service import BleakGATTCharacteristic
 from bleak.exc import BleakError
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
+    BluetoothAdvertisementData,
     BluetoothServiceInfoBleak,
     async_ble_device_from_address,
 )
@@ -189,9 +190,12 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
 
     async def _async_update_data(self) -> None:
         """Fetch data from BLE device. Not used if relying on notifications primarily."""
-        _LOGGER.debug("Attempting to ensure connection for %s", self.device.address)
+        _LOGGER.debug("Polling: Attempting to ensure connection for %s", self.device.address)
         if not await self.connect_and_setup():
-            _LOGGER.warning("Failed to ensure connection for %s", self.device.address)
+            # This will inform DataUpdateCoordinator that the update failed and entities should become unavailable
+            raise UpdateFailed(f"Failed to ensure connection for {self.device.address} during scheduled update.")
+        # If connect_and_setup is successful, notifications should be active.
+        # No specific data is returned here as updates come via notifications.
         return None
 
     async def async_config_entry_first_refresh(self) -> None:
@@ -359,15 +363,29 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
         )
         
         # Construct a BluetoothServiceInfoBleak for the update
-        # This is needed for the passive update processor
+        # Create a minimal BluetoothServiceInfoBleak with required parameters
+        # Note: We're using dummy values for some fields since we don't have the actual data from a scan
         service_info = BluetoothServiceInfoBleak(
-            name=self.device.device_name,
+            name=self.device.device_name or "Bookoo Scale",
             address=self.device.address,
             rssi=-70,  # Default RSSI as we don't have it from notifications
             manufacturer_data={},
-            service_data={},
             service_uuids=[],
+            service_data={},
+            service_data_uuids=[],
             source="notification",  # Custom source to indicate this is from a notification
+            device=None,  # BleakDeviceInfo object, not needed for our use case
+            advertisement=BluetoothAdvertisementData(
+                local_name=self.device.device_name or "Bookoo Scale",
+                manufacturer_data={},
+                service_data={},
+                service_uuids=[],
+                platform_data=None,
+                tx_power=None,
+                rssi=-70,
+            ),
+            time=0,  # Timestamp, not critical for our use case
+            connectable=True,  # Assume device is connectable
         )
         
         # Update the internal state via the passive coordinator
@@ -401,40 +419,47 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
         except asyncio.CancelledError:
             pass
         except Exception as err:
-            _LOGGER.error("Error waiting for notifications: %s", err)
-
-    async def send_command(self, command: bytes) -> bool:
-        """Send a command to the device."""
-        # Check connection without lock first
-        if not self.is_connected:
-            _LOGGER.debug("Not connected, attempting to connect before sending command to %s", self.device.address)
-            if not await self.connect_and_setup():
-                _LOGGER.error("Failed to connect, cannot send command to %s", self.device.address)
-                return False
-        
-        # Get client and characteristic references while holding lock
-        async with self._data_lock:
-            if not self._client or not self._command_char:
-                _LOGGER.error("Client or command characteristic not available for %s", self.device.address)
-                return False
             
-            client = self._client
-            command_char = self._command_char
+            if not self._update_received and not self._disconnect_event.is_set():
+                _LOGGER.warning(
+                    "No notifications received from %s after %d seconds",
+                    self.device.address,
+                    NOTIFICATION_TIMEOUT_SECONDS,
+                )
+                await self.disconnect()
 
-        # Send command outside of lock to avoid blocking
+    async def send_command(self, command: bytes, description: str = "command") -> bool:
+        """Send a command to the device."""
+        _LOGGER.debug("Attempting to send %s to %s", description, self.device.address)
+        
+        if not await self.connect_and_setup(): # This handles connection and char discovery
+            _LOGGER.error("Failed to connect or setup characteristics, cannot send %s to %s", description, self.device.address)
+            return False
+
+        # Defensive check, though connect_and_setup should ensure these if it returned True.
+        if not self._client or not self._command_char:
+            _LOGGER.error(
+                "BLE client or command characteristic not available for %s even after connect_and_setup.", 
+                self.device.address
+            )
+            return False
+
         try:
-            _LOGGER.debug("Sending command to %s: %s", self.device.address, command.hex())
-            await client.write_gatt_char(command_char, command, response=True)
-            _LOGGER.debug("Successfully sent command to %s", self.device.address)
+            _LOGGER.debug("Sending %s to %s: %s", description, self.device.address, command.hex())
+            # Using response=False as a default. Change to response=True if device acknowledges commands on this char.
+            await self._client.write_gatt_char(self._command_char, command, response=False) 
+            _LOGGER.debug("Successfully sent %s to %s", description, self.device.address)
             return True
+        except BleakError as e:
+            _LOGGER.error("BleakError sending %s to %s: %s", description, self.device.address, e)
         except asyncio.TimeoutError:
-            _LOGGER.error("Timeout sending command to %s", self.device.address)
-        except BleakError as err:
-            _LOGGER.error("BleakError sending command to %s: %s", self.device.address, err)
-            self.hass.async_create_task(self.disconnect())
-        except Exception as err:
-            _LOGGER.error("Unexpected error sending command to %s: %s", self.device.address, err, exc_info=True)
-            self.hass.async_create_task(self.disconnect())
+            _LOGGER.error("Timeout sending %s to %s", description, self.device.address)
+        except Exception as e:
+            _LOGGER.error("Unexpected error sending %s to %s: %s", description, self.device.address, e, exc_info=True)
+        
+        # If any error occurred and was caught, return False.
+        # Consider if a disconnect is needed for persistent errors.
+        # self.hass.async_create_task(self.disconnect()) # Optionally, uncomment if errors should trigger a disconnect attempt.
         return False
 
     # Command methods

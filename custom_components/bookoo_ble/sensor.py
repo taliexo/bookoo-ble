@@ -33,6 +33,10 @@ from .const import (
     ATTR_FLOW_RATE,
     ATTR_TIMER,
     ATTR_BATTERY_LEVEL,
+    ATTR_TIMER_STATUS,
+    ATTR_BEEP_LEVEL,
+    ATTR_AUTO_OFF_MINUTES,
+    ATTR_FLOW_SMOOTHING,
 )
 from .coordinator import BookooDeviceCoordinator # Import for type hint
 
@@ -71,20 +75,20 @@ SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorEntityDescription(
-        key="timer_status", # From parser.py, not in const.py
+        key=ATTR_TIMER_STATUS,
         name="Timer Status",
         icon="mdi:timer-play-outline", # mdi:timer-pause-outline or mdi:timer-stop-outline could also be used
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorEntityDescription(
-        key="beep_level", # From parser.py, not in const.py
+        key=ATTR_BEEP_LEVEL,
         name="Beep Level",
         icon="mdi:volume-high",
         state_class=SensorStateClass.MEASUREMENT, # Assuming it's a numeric value 0-5
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorEntityDescription(
-        key="auto_off_minutes", # From parser.py, not in const.py
+        key=ATTR_AUTO_OFF_MINUTES,
         name="Auto Off Minutes",
         native_unit_of_measurement=UnitOfTime.MINUTES,
         icon="mdi:timer-off-outline",
@@ -92,10 +96,10 @@ SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorEntityDescription(
-        key="flow_smoothing", # From parser.py, not in const.py
+        key=ATTR_FLOW_SMOOTHING,
         name="Flow Smoothing",
         icon="mdi:chart-line-variant", # mdi:chart-bell-curve-cumulative or mdi:tune-variant
-        # This is likely a boolean, so might be better as a binary_sensor or switch
+        # This is likely a boolean, and its state is controlled by a switch entity.
         # If it's a sensor showing 'On'/'Off', then no state_class needed.
         entity_category=EntityCategory.DIAGNOSTIC,
     ),

@@ -16,100 +16,129 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, ATTR_TIMER_STATUS
-from .coordinator import BookooBluetoothDeviceData, BookooPassiveBluetoothDataProcessor
-from .models import BookooData
+from homeassistant.components.bluetooth.passive_update_processor import (
+    PassiveBluetoothDataUpdate,
+    PassiveBluetoothEntityKey,
+    PassiveBluetoothProcessorCoordinator,
+    PassiveBluetoothProcessorEntity,
+)
+from homeassistant.helpers.entity import DeviceInfo
 
-if TYPE_CHECKING:
-    from homeassistant.components.bluetooth.passive_update_processor import (
-        PassiveBluetoothDataUpdate,
-    )
+from .const import DOMAIN, ATTR_TIMER_STATUS, ATTR_STABLE, ATTR_TARE_ACTIVE, MANUFACTURER # Assuming ATTR_STABLE and ATTR_TARE_ACTIVE will be added to const.py
+from .coordinator import BookooDeviceCoordinator # For type hint
+
 
 _LOGGER = logging.getLogger(__name__)
 
-TIMER_STATUS_DESCRIPTION = BinarySensorEntityDescription(
-    key=ATTR_TIMER_STATUS,
-    name="Timer Status",
-    device_class=BinarySensorDeviceClass.RUNNING, # Or .PLAYING, .OCCUPANCY, etc.
+BINARY_SENSOR_DESCRIPTIONS: tuple[BinarySensorEntityDescription, ...] = (
+    BinarySensorEntityDescription(
+        key=ATTR_TIMER_STATUS,
+        name="Timer Status",
+        device_class=BinarySensorDeviceClass.RUNNING,
+    ),
+    # Placeholder for future binary sensors if stable/tare_active are implemented
+    # BinarySensorEntityDescription(
+    #     key=ATTR_STABLE,
+    #     name="Weight Stable",
+    #     device_class=BinarySensorDeviceClass.STABILITY, # Or custom
+    # ),
+    # BinarySensorEntityDescription(
+    #     key=ATTR_TARE_ACTIVE,
+    #     name="Tare Active",
+    #     device_class=BinarySensorDeviceClass.OCCUPANCY, # Or custom, e.g. 'active'
+    # ),
 )
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Bookoo BLE binary sensor entities based on a config entry."""
-    passive_coordinator = hass.data[DOMAIN][entry.entry_id]["passive_coordinator"]
-    processor: BookooPassiveBluetoothDataProcessor = passive_coordinator.processor
+    """Set up Bookoo BLE binary sensors based on a config entry."""
+    coordinators = hass.data[DOMAIN][entry.entry_id]
+    device_coordinator: BookooDeviceCoordinator = coordinators["device_coordinator"]
+    passive_coordinator: PassiveBluetoothProcessorCoordinator = coordinators["passive_coordinator"]
 
-    # We will create the entity directly from the processor's tracked devices
-    # when the first notification for timer_status arrives for a device.
-    # Alternatively, one could iterate hass.data[DOMAIN][entry.entry_id]["device_coordinator"].device
-    # if only one device per entry, but passive setup is more dynamic.
-
-    @callback
-    def _async_add_sensor_entity(address: str) -> None:
-        """Add a Bookoo timer status binary sensor entity."""
-        # This callback can be triggered by the processor when it first sees a timer_status
-        # for a new device, or we can proactively create them if devices are already known.
-        # For simplicity, let's assume the processor will handle entity creation via its updates.
-        # This part needs careful integration with how PassiveBluetoothDataProcessor signals new entities.
-        # For now, we'll rely on the entity being created when data for it is pushed.
-        pass
-
-    # Entities are created dynamically by PassiveBluetoothProcessorEntity
-    # when data for their entity_key is first pushed.
-    # We just need to ensure the processor knows about this entity description.
-
-    # This is a placeholder for how entities might be registered if needed upfront.
-    # However, PassiveBluetoothProcessorEntity handles dynamic creation.
-    # coordinator = hass.data[DOMAIN][entry.entry_id]["device_coordinator"]
-    # if coordinator.device:
-    #     async_add_entities([BookooTimerStatusBinarySensor(coordinator.device, processor)])
-    # For now, we'll let the PassiveBluetoothProcessorEntity mechanism handle it.
-    _LOGGER.debug("Bookoo BLE binary_sensor platform setup complete.")
+    entities = []
+    for description in BINARY_SENSOR_DESCRIPTIONS:
+        # Ensure device_address and device_name are available for unique_id and device_info
+        # These would typically come from the config entry or a central device object
+        entities.append(
+            BookooPassiveBinarySensor(
+                passive_coordinator,
+                description,
+                device_coordinator.device.address, # device_coordinator has the specific device
+                device_coordinator.device.device_name,
+            )
+        )
+    async_add_entities(entities)
 
 
-class BookooTimerStatusBinarySensor(
-    PassiveBluetoothProcessorEntity[BookooPassiveBluetoothDataProcessor],
+class BookooPassiveBinarySensor(
+    PassiveBluetoothProcessorEntity[PassiveBluetoothProcessorCoordinator],
     BinarySensorEntity,
 ):
-    """Representation of a Bookoo BLE Timer Status binary sensor."""
-
-    entity_description: BinarySensorEntityDescription = TIMER_STATUS_DESCRIPTION
+    """Representation of a Bookoo BLE binary sensor updated passively."""
 
     def __init__(
         self,
-        device_data: BookooBluetoothDeviceData, # This would be needed if creating manually
-        processor: BookooPassiveBluetoothDataProcessor,
+        coordinator: PassiveBluetoothProcessorCoordinator,
+        description: BinarySensorEntityDescription,
+        device_address: str,
+        device_name: str, # Added for explicit device_info
     ) -> None:
         """Initialize the binary sensor entity."""
-        super().__init__(processor)
-        # Note: PassiveBluetoothProcessorEntity sets up _attr_unique_id, _attr_device_info, etc.
-        # based on the entity_key and device_id derived from BluetoothServiceInfoBleak
-        # when data is pushed via processor.async_handle_update.
-        # We need to ensure that the entity_key for this sensor (ATTR_TIMER_STATUS)
-        # is correctly mapped in the processor.
+        self.entity_description = description
+        # PassiveBluetoothProcessorEntity requires entity_key for its internal logic
+        entity_key = PassiveBluetoothEntityKey(description.key, device_address)
+        super().__init__(coordinator, entity_key)
 
-        # Store the specific device data if needed for direct access, though passive entities
-        # usually get their state from the processed data update.
-        # self._device_data = device_data 
+        # Set a more specific unique_id and device_info
+        self._attr_unique_id = f"{DOMAIN}_{device_address}_{description.key}"
+        self._attr_has_entity_name = True
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_address)},
+            name=device_name,
+            manufacturer=MANUFACTURER, # Assuming MANUFACTURER is in const.py
+            model="Bookoo Mini Scale",    # Consistent model name
+        )
 
     @property
     def is_on(self) -> bool | None:
         """Return true if the binary sensor is on."""
-        # The state is derived from the data pushed by the PassiveBluetoothDataProcessor
-        # The key for this entity in the processed data should match self.entity_description.key
-        if (
-            self.processor.entity_data.get(self.entity_key)
-            and isinstance(self.processor.entity_data[self.entity_key], str)
-        ):
-            # Assuming 'timer_status' from parsed_data is a string like 'Running' or 'Stopped'
-            status_str = str(self.processor.entity_data[self.entity_key])
-            return status_str.lower() == "running"
-        return None # Or False if an unknown state should be off
+        entity_data = self.processor.entity_data.get(self.entity_key)
+        if entity_data is None:
+            return None
 
-    # _handle_coordinator_update is automatically called by PassiveBluetoothProcessorEntity
-    # when data for this entity's entity_key is updated.
-    # No need to implement it manually unless custom logic is required beyond state update.
+        if self.entity_description.key == ATTR_TIMER_STATUS:
+            if isinstance(entity_data, str):
+                status_lower = entity_data.lower()
+                if status_lower == "started":
+                    return True
+                if status_lower == "stopped":  # Assuming 'stopped' is the state for not running
+                    return False
+            _LOGGER.debug(
+                "Timer status for %s received unexpected data: %s (expected 'started' or 'stopped')",
+                self.entity_id,
+                entity_data,
+            )
+            return None # Data is not a recognized string or not a string at all
+        
+        # Future handling for other binary sensors like ATTR_STABLE, ATTR_TARE_ACTIVE
+        # if isinstance(entity_data, bool):
+        #     return entity_data
+        
+        return None # Default for unhandled or unexpected data types
+
+    @callback
+    def _async_update_from_processor_data(
+        self, update: PassiveBluetoothDataUpdate
+    ) -> None:
+        """Update the entity from the processor data."""
+        # The PassiveBluetoothDataUpdate contains all data for the device.
+        # We need to extract the specific value for this sensor's key.
+        new_value = update.entity_data.get(self.entity_key)
+        # is_on property will use this new_value when Home Assistant requests state.
+        # We just need to tell HA that the state might have changed.
+        self.async_write_ha_state()
+

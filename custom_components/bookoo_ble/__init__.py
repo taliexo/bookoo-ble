@@ -31,15 +31,6 @@ PLATFORMS: Final[list[Platform]] = [
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the Bookoo BLE component."""
-    hass.data.setdefault(DOMAIN, {})
-    
-    # Set up services
-    await async_setup_services(hass)
-    return True
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Bookoo BLE from a config entry."""
     hass.data.setdefault(DOMAIN, {})

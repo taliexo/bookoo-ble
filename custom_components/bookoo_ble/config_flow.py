@@ -40,6 +40,7 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Bookoo BLE."""
 
     VERSION = 1
+    MINOR_VERSION = 1
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -240,9 +241,9 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data={
                         CONF_ADDRESS: address,
                         CONF_NAME: name,
-                        "beep_level": DEFAULT_BEEP_LEVEL,
-                        "auto_off_minutes": DEFAULT_AUTO_OFF_MINUTES,
-                        "flow_smoothing": DEFAULT_FLOW_SMOOTHING,
+                        "beep_level": user_input.get("beep_level", DEFAULT_BEEP_LEVEL),
+                        "auto_off_minutes": user_input.get("auto_off_minutes", DEFAULT_AUTO_OFF_MINUTES),
+                        "flow_smoothing": user_input.get("flow_smoothing", DEFAULT_FLOW_SMOOTHING),
                     },
                 )
         
@@ -252,6 +253,23 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Required(CONF_ADDRESS): str,
                 vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
+                vol.Optional("beep_level", default=DEFAULT_BEEP_LEVEL): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        max=5,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional("auto_off_minutes", default=DEFAULT_AUTO_OFF_MINUTES): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1,
+                        max=30,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional("flow_smoothing", default=DEFAULT_FLOW_SMOOTHING): BooleanSelector(),
             }),
             errors=errors,
             description_placeholders={"message": "Enter the MAC address of your Bookoo scale."}

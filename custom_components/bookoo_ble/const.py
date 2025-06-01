@@ -63,6 +63,7 @@ ATTR_TARE_ACTIVE: Final = "tare_active"
 ATTR_FLOW_SMOOTHING: Final = "flow_smoothing"
 ATTR_BEEP_LEVEL: Final = "beep_level"
 ATTR_AUTO_OFF_MINUTES: Final = "auto_off_minutes"
+ATTR_TIMER_STATUS: Final = "timer_status"
 
 # Sensor units
 UNIT_GRAMS: Final = "g"
