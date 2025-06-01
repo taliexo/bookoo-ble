@@ -50,7 +50,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Create device data and processor
     processor = BookooPassiveBluetoothDataProcessor(
-        lambda update: hass.async_create_task(processor.async_update_data(update))
+        sensor_update_callback=lambda update: None  # Will be set by PassiveBluetoothProcessorCoordinator
     )
     
     # Create passive coordinator
@@ -81,16 +81,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "passive_coordinator": passive_coordinator,
     }
 
-    # Start the passive coordinator to begin receiving Bluetooth updates
-    try:
-        await passive_coordinator.async_start()
-    except Exception as e:
-        _LOGGER.error("Error starting passive coordinator: %s", e)
-        # Depending on the desired behavior, you might want to raise ConfigEntryNotReady here
-        # For now, we'll log and continue, but this might leave the integration in a partial state.
-        # Consider: raise ConfigEntryNotReady(f"Failed to start Bluetooth listener: {e}") from e
-        pass # Or re-raise, or handle more gracefully
-    
     # Set up services if not already set up
     if len(hass.data[DOMAIN]) == 1:  # Only set up services once
         await async_setup_services(hass)
@@ -113,13 +103,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if beep_level is not None:
         _LOGGER.debug("Applying initial beep level: %s", beep_level)
-        await device_coordinator.async_set_beep_level(beep_level)
+        await device_coordinator.async_set_beep_level(int(beep_level))
     if auto_off_minutes is not None:
         _LOGGER.debug("Applying initial auto-off minutes: %s", auto_off_minutes)
-        await device_coordinator.async_set_auto_off_minutes(auto_off_minutes)
+        await device_coordinator.async_set_auto_off_minutes(int(auto_off_minutes))
     if flow_smoothing is not None:
         _LOGGER.debug("Applying initial flow smoothing: %s", flow_smoothing)
-        await device_coordinator.async_set_flow_smoothing(flow_smoothing)
+        await device_coordinator.async_set_flow_smoothing(bool(flow_smoothing))
     
     # Forward entry setup to platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -136,18 +126,24 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
     if unload_ok and entry.entry_id in hass.data[DOMAIN]:
-        coordinators = hass.data[DOMAIN].pop(entry.entry_id)
-        passive_coordinator = coordinators["passive_coordinator"]
+        coordinators = hass.data[DOMAIN][entry.entry_id]
         device_coordinator = coordinators["device_coordinator"]
-
-        # Stop the passive coordinator from receiving Bluetooth updates
-        try:
-            await passive_coordinator.async_stop()
-        except Exception as e:
-            _LOGGER.error("Error stopping passive coordinator: %s", e)
+        passive_coordinator = coordinators["passive_coordinator"]
+        
+        # Stop the passive coordinator to ensure proper cleanup
+        # This will unregister the Bluetooth processor and stop processing updates
+        if hasattr(passive_coordinator, 'async_stop'):
+            try:
+                await passive_coordinator.async_stop()
+                _LOGGER.debug("Successfully stopped passive coordinator for %s", entry.data[CONF_ADDRESS])
+            except Exception as e:
+                _LOGGER.error("Error stopping passive coordinator: %s", e)
         
         # Disconnect the device coordinator
         await device_coordinator.disconnect()
+        
+        # Remove entry data
+        hass.data[DOMAIN].pop(entry.entry_id)
         
         # Unload services if this was the last entry
         if not hass.data[DOMAIN]:
