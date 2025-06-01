@@ -201,11 +201,13 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            address = user_input[CONF_ADDRESS]
+            address = user_input[CONF_ADDRESS].upper()  # Normalize to uppercase
             name = user_input.get(CONF_NAME, DEFAULT_NAME)
 
             # Basic MAC address validation (can be improved)
+            # Validates XX:XX:XX:XX:XX:XX format after uppercasing
             if not (isinstance(address, str) and len(address) == 17 and address.count(':') == 5):
+                # Further validation could check for valid hex characters if needed
                 errors["base"] = "invalid_mac_address"
             else:
                 await self.async_set_unique_id(address, raise_on_progress=False)

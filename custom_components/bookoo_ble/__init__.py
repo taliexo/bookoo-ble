@@ -80,6 +80,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_coordinator": device_coordinator,
         "passive_coordinator": passive_coordinator,
     }
+
+    # Start the passive coordinator to begin receiving Bluetooth updates
+    try:
+        await passive_coordinator.async_start()
+    except Exception as e:
+        _LOGGER.error("Error starting passive coordinator: %s", e)
+        # Depending on the desired behavior, you might want to raise ConfigEntryNotReady here
+        # For now, we'll log and continue, but this might leave the integration in a partial state.
+        # Consider: raise ConfigEntryNotReady(f"Failed to start Bluetooth listener: {e}") from e
+        pass # Or re-raise, or handle more gracefully
     
     # Set up services if not already set up
     if len(hass.data[DOMAIN]) == 1:  # Only set up services once
@@ -127,7 +137,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     if unload_ok and entry.entry_id in hass.data[DOMAIN]:
         coordinators = hass.data[DOMAIN].pop(entry.entry_id)
+        passive_coordinator = coordinators["passive_coordinator"]
         device_coordinator = coordinators["device_coordinator"]
+
+        # Stop the passive coordinator from receiving Bluetooth updates
+        try:
+            await passive_coordinator.async_stop()
+        except Exception as e:
+            _LOGGER.error("Error stopping passive coordinator: %s", e)
         
         # Disconnect the device coordinator
         await device_coordinator.disconnect()
