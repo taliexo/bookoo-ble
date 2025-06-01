@@ -13,7 +13,7 @@ from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_ble_device_from_address,
 )
-from homeassistant.components.bluetooth.models import BluetoothAdvertisementData
+from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.components.bluetooth.passive_update_processor import (
     PassiveBluetoothDataProcessor,
@@ -379,17 +379,16 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
                 service_data_uuids=[],
                 source="notification",  # Custom source to indicate this is from a notification
                 device=None,  # BleakDeviceInfo object, not needed for our use case
-                advertisement=BluetoothAdvertisementData(
-                    local_name=self.device.device_name or "Bookoo Scale",
-                    manufacturer_data={},
-                    service_data={},
-                    service_uuids=[SERVICE_UUID],
-                    platform_data=None,
-                    tx_power=None,
-                    rssi=-70,
-                ),
+                advertisement={
+                    "local_name": self.device.device_name or "Bookoo Scale",
+                    "manufacturer_data": {},
+                    "service_data": {},
+                    "service_uuids": [SERVICE_UUID],
+                    "rssi": -70,
+                },
                 time=0,  # Timestamp, not critical for our use case
                 connectable=True,  # Assume device is connectable
+                tx_power=None,
             )
         
         # Update the internal state via the passive coordinator
