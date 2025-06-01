@@ -52,13 +52,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sensor_update_callback=lambda data_update: None,  # Placeholder, set by coordinator
     )
     
+    # Home Assistant ≥2024.12 removed the ``processor=`` kw‑arg.  
+    # Instantiate the coordinator first, then register our processor.
     passive_coordinator = PassiveBluetoothProcessorCoordinator(
         hass,
         _LOGGER,
         address=address,
         mode=BluetoothScanningMode.ACTIVE,
-        processor=passive_processor,
     )
+
+    # New API – add the data‑processor explicitly
+    passive_coordinator.add_processor(passive_processor)
+
+    # Backwards‑compat shim: parts of the integration still refer to
+    # ``coordinator.processor``.  Keep a direct reference until those
+    # call‑sites are refactored.
+    passive_coordinator.processor = passive_processor
     
     # Create the device coordinator
     device_coordinator = BookooDeviceCoordinator(
