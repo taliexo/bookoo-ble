@@ -54,19 +54,11 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
 
-        # Store discovery info for the next step
+        # Store discovery info for the confirm step
         self._discovery_info = discovery_info
         
-        # Use the device name as the default name, if available
-        name = discovery_info.name or DEFAULT_NAME
-        
-        # Show a confirmation form to the user
-        self.context["title_placeholders"] = {"name": name, "address": discovery_info.address}
-        return self.async_show_form(
-            step_id="bluetooth_confirm",
-            description_placeholders={"name": name, "address": discovery_info.address},
-            # errors=errors, # If any validation errors occur
-        )
+        # Proceed to the confirmation step
+        return await self.async_step_bluetooth_confirm()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -174,11 +166,11 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_bluetooth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the bluetooth confirmation step."""
+        """Handle confirmation of Bluetooth discovery."""
         _LOGGER.debug(
             "Entering async_step_bluetooth_confirm with user_input: %s", user_input
         )
-        
+
         if self._discovery_info is None:
             _LOGGER.error(
                 "'_discovery_info' is None in async_step_bluetooth_confirm. "
@@ -187,36 +179,41 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="discovery_info_missing")
 
         discovery_info = self._discovery_info
-        name = discovery_info.name or DEFAULT_NAME
-        
-        # When the confirmation form (shown by async_step_bluetooth) is submitted,
-        # user_input will be an empty dictionary {} if no data_schema was provided,
-        # or it will contain data if a schema was provided.
-        # The key is that user_input is not None if the form was submitted.
+        # Use discovery_info.name or DEFAULT_NAME for both title and CONF_NAME in data
+        device_name = discovery_info.name or DEFAULT_NAME
+
         if user_input is not None:
+            # User has confirmed the device
             _LOGGER.debug(
                 "User confirmed Bluetooth device: %s (%s). Creating entry.",
-                name,
+                device_name,
                 discovery_info.address,
             )
             return self.async_create_entry(
-                title=name,
+                title=device_name,
                 data={
                     CONF_ADDRESS: discovery_info.address,
-                    CONF_NAME: name,
+                    CONF_NAME: device_name,  # Store name in data as per user_step
                     "beep_level": DEFAULT_BEEP_LEVEL,
                     "auto_off_minutes": DEFAULT_AUTO_OFF_MINUTES,
                     "flow_smoothing": DEFAULT_FLOW_SMOOTHING,
                 },
             )
 
-        # This path (user_input is None) should ideally not be hit if 
-        # this step is only reached via form submission from async_step_bluetooth.
-        _LOGGER.warning(
-            "async_step_bluetooth_confirm was called but user_input is None. "
-            "This is an unexpected state."
+        # user_input is None, so show the confirmation form
+        self.context["title_placeholders"] = {
+            "name": device_name,
+            "address": discovery_info.address
+        }
+        self._set_confirm_only() # Makes it a simple confirm/cancel dialog
+        return self.async_show_form(
+            step_id="bluetooth_confirm",
+            description_placeholders={
+                "name": device_name,
+                "address": discovery_info.address
+            },
+            # No data_schema needed for a simple confirmation dialog
         )
-        return self.async_abort(reason="unexpected_user_input") # More specific error
 
     async def async_step_manual(
         self, user_input: dict[str, Any] | None = None
