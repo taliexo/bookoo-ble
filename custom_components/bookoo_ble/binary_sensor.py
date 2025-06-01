@@ -90,11 +90,7 @@ class BookooPassiveBinarySensor(
         """Initialize the binary sensor entity."""
         # Create entity key and pass description to parent
         entity_key = PassiveBluetoothEntityKey(description.key, device_address)
-        super().__init__(
-            coordinator=coordinator,
-            entity_key=entity_key,
-            description=description,
-        )
+        super().__init__(coordinator, entity_key, description)
 
         # Set a more specific unique_id and device_info
         self._attr_unique_id = f"{DOMAIN}_{device_address}_{description.key}"

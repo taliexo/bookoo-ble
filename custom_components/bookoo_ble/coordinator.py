@@ -376,7 +376,6 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
                 manufacturer_data={},
                 service_uuids=[SERVICE_UUID],
                 service_data={},
-                service_data_uuids=[],
                 source="notification",  # Custom source to indicate this is from a notification
                 device=None,  # BleakDeviceInfo object, not needed for our use case
                 advertisement={
