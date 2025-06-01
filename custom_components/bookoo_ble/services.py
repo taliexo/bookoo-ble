@@ -10,14 +10,15 @@ import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import entity_registry as er, config_validation as cv
 from homeassistant.helpers.entity_platform import async_get_platforms
+from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID # Added import
 
 from .const import (
     DOMAIN,
     DEFAULT_BEEP_LEVEL,
     DEFAULT_AUTO_OFF_MINUTES,
     DEFAULT_FLOW_SMOOTHING,
-    ATTR_ENTITY_ID,
-    ATTR_DEVICE_ID,
+    # ATTR_ENTITY_ID, # Removed, imported from homeassistant.const
+    # ATTR_DEVICE_ID, # Removed, imported from homeassistant.const
 )
 from .coordinator import BookooDeviceCoordinator
 
