@@ -81,6 +81,17 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
+    # Register entity services for these buttons
+    platform = hass.helpers.entity_platform.async_get_current_platform()
+    for description in BUTTON_DESCRIPTIONS:
+        # The service name will be the same as the button's key
+        # The method called on the entity will be async_press
+        platform.async_register_entity_service(
+            name=description.key,
+            schema={},
+            func="async_press",
+        )
+
 
 class BookooButton(ButtonEntity):
     """Representation of a Bookoo BLE button."""

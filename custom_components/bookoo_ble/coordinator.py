@@ -12,6 +12,7 @@ from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_ble_device_from_address,
+    async_establish_connection, # Added for HA connection helper
     # BLEAK_RECONNECT_EXCEPTIONS, # Removed due to import error
 )
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -33,6 +34,7 @@ from .const import (
     CMD_TARE,
     CMD_TARE_AND_START_TIMER,
     DOMAIN,
+    MAX_RECONNECT_ATTEMPTS, # Added for retry logic
     NOTIFICATION_TIMEOUT_SECONDS,
     SERVICE_UUID,
     cmd_set_auto_off,
@@ -41,6 +43,12 @@ from .const import (
 )
 from .models import BookooBluetoothDeviceData, BookooData
 from .parser import BookooBluetoothParser
+from .const import ATTR_TIMER_STATUS # Ensure ATTR_TIMER_STATUS is imported
+from .binary_sensor import TIMER_STATUS_DESCRIPTION # Import the description
+from .sensor import SENSOR_DESCRIPTIONS as ALL_SENSOR_DESCRIPTIONS # Import sensor descriptions
+
+# Create a lookup map for sensor descriptions by key
+SENSOR_DESCRIPTIONS_BY_KEY = {desc.key: desc for desc in ALL_SENSOR_DESCRIPTIONS}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,26 +128,34 @@ class BookooPassiveBluetoothDataProcessor(PassiveBluetoothDataProcessor):
                 device.data.timer_status = parsed_data["timer_status"]
         
         # Create an entity map for the passive update processor
-        entity_key_map = {}
         entity_data = {}
+        entity_descriptions_map = {}
+        # entity_key_map = {} # Not directly used by async_handle_update structure shown
+        # entity_names_map = {} # For custom names, if needed
         
         # Map each attribute to a unique entity key
         for key, value in parsed_data.items():
             if key != "message_type" and key != "raw_timer_ms" and key != "raw_status_byte":
-                entity_key = PassiveBluetoothEntityKey(
+                entity_key_obj = PassiveBluetoothEntityKey(
                     key=key,
                     device_id=service_info.address,
                 )
-                entity_key_map[entity_key] = device
-                entity_data[entity_key] = value
+                # entity_key_map[entity_key_obj] = device # Store device if needed elsewhere, not for async_handle_update
+                entity_data[entity_key_obj] = value
+
+                # If this key is for the timer status, provide its description
+                if key == ATTR_TIMER_STATUS:
+                    entity_descriptions_map[entity_key_obj] = TIMER_STATUS_DESCRIPTION
+                elif key in SENSOR_DESCRIPTIONS_BY_KEY: # Check if it's a known sensor key
+                    entity_descriptions_map[entity_key_obj] = SENSOR_DESCRIPTIONS_BY_KEY[key]
                 
         if entity_data:
             self.async_handle_update(
                 service_info.address,
                 {
                     "entity_data": entity_data,
-                    "entity_descriptions": {},
-                    "entity_names": {},
+                    "entity_descriptions": entity_descriptions_map,
+                    "entity_names": {}, # Populate if custom entity names are desired
                     "entity_pictures": {},
                 },
             )
@@ -171,6 +187,26 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
         self._data_lock = asyncio.Lock() # Protects _client and char access
         self._is_connected = False
         self._expected_disconnect = False # Flag to differentiate expected vs unexpected disconnects
+
+    async def _reconnect_with_backoff(self) -> bool:
+        """Attempt to reconnect to the device with exponential backoff."""
+        _LOGGER.debug("Attempting to reconnect to %s with backoff", self.device.address)
+        for attempt in range(MAX_RECONNECT_ATTEMPTS):
+            try:
+                if await self.connect_and_setup():
+                    _LOGGER.info("Successfully reconnected to %s after attempt %d", self.device.address, attempt + 1)
+                    return True
+            except Exception as e: # Catch any exception during connect_and_setup
+                _LOGGER.debug("Reconnect attempt %d failed for %s: %s", attempt + 1, self.device.address, e)
+            
+            # If not the last attempt, wait with exponential backoff
+            if attempt < MAX_RECONNECT_ATTEMPTS - 1:
+                delay = 2 ** attempt
+                _LOGGER.debug("Waiting %d seconds before next reconnect attempt to %s", delay, self.device.address)
+                await asyncio.sleep(delay)
+        
+        _LOGGER.error("Failed to reconnect to %s after %d attempts", self.device.address, MAX_RECONNECT_ATTEMPTS)
+        return False
 
     @property
     def is_connected(self) -> bool:
@@ -204,13 +240,27 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
             _LOGGER.debug("Attempting to connect to %s", self.device.address)
             ble_device = bluetooth.async_ble_device_from_address(self.hass, self.device.address, connectable=True)
             if not ble_device:
-                _LOGGER.warning("Device %s not found by Bluetooth manager", self.device.address)
-                return False
-
-            client = BleakClient(ble_device, disconnected_callback=self._handle_disconnect)
+                _LOGGER.warning("Device %s not found by Bluetooth manager, will retry if device appears.", self.device.address)
+                # When using async_establish_connection, it's better to let it handle the device not found
+                # by potentially retrying with the ble_device_callback.
+                # However, an immediate return False might be okay if we don't want to wait here.
+                # For now, let's proceed and let async_establish_connection handle it.
+                pass # Let async_establish_connection handle it if ble_device is None initially.
 
             try:
-                await client.connect(timeout=10.0)
+                # Use async_establish_connection helper
+                client = await bluetooth.async_establish_connection(
+                    BleakClient,
+                    ble_device, # This can be None initially, ble_device_callback will be used
+                    self.device.address, # Unique name for logging
+                    self._handle_disconnect,
+                    cached_services=None, # We are not using cached services here
+                    # Callback to refetch BLEDevice if initial ble_device is None or connection fails
+                    ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
+                        self.hass, self.device.address, connectable=True
+                    )
+                )
+                # async_establish_connection raises an error on failure, so no need to check if client is None
                 _LOGGER.info("Successfully connected to %s", self.device.address)
                 self._client = client
                 self._is_connected = True
@@ -294,28 +344,45 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
         self.async_update_listeners() # Notify entities
 
     def _handle_disconnect(self, client: BleakClient) -> None:
-        """Handle Bluetooth disconnection."""
-        if self._expected_disconnect:
-            _LOGGER.debug("Expected disconnect from %s", client.address)
-            self._expected_disconnect = False # Reset flag
-            return
+        """Handle Bluetooth disconnection by scheduling tasks in the HA event loop."""
+        _LOGGER.debug("Bluetooth disconnected for %s, scheduling state update.", client.address)
+        
+        # Schedule all logic to run in the HA event loop
+        self.hass.async_create_task(self._async_process_disconnect(client.address))
 
-        _LOGGER.warning("Device %s disconnected unexpectedly", client.address)
-        # Do not attempt to use the 'client' object here as it's disconnected.
-        # Clear our state and notify listeners.
-        async def clear_state_and_notify(): # Use async def for hass.add_job
-            async with self._data_lock:
-                self._client = None
+    async def _async_process_disconnect(self, address: str) -> None:
+        """Process disconnection event in HA event loop."""
+        notify_listeners = False
+        log_unexpected = False
+
+        async with self._data_lock:
+            if self._expected_disconnect:
+                _LOGGER.debug("Expected disconnect processed for %s", address)
+                self._expected_disconnect = False # Reset flag under lock
+                # If client matches, ensure it's cleared. disconnect() should handle this mostly.
+                if self._client and self._client.address == address:
+                    self._client = None
+                self._is_connected = False
+                # self.async_update_listeners() is called by disconnect(), so may not be needed here.
+                # However, if _handle_disconnect is called *without* disconnect() being the trigger for expected=True,
+                # then updating listeners might be necessary. For now, assume disconnect() handles it.
+            else:
+                log_unexpected = True # Log outside lock
+                # Clear our state as it's an unexpected disconnect
+                if self._client and self._client.address == address:
+                     self._client = None
                 self._is_connected = False
                 self._command_char = None
                 self._weight_char = None
-            self.async_update_listeners()
-            # Optionally, schedule a reconnect attempt or rely on next command/poll
-            # For now, we won't auto-reconnect here to avoid connection storms.
-            # Reconnection will be attempted on next service call or if _async_update_data is polled.
+                notify_listeners = True # State changed unexpectedly
+        
+        if log_unexpected:
+            _LOGGER.warning("Device %s disconnected unexpectedly", address)
 
-        # Schedule the state clearing and listener update in the HA event loop
-        self.hass.async_create_task(clear_state_and_notify())
+        if notify_listeners:
+            self.async_update_listeners()
+        # Optional: schedule a reconnect attempt or rely on next command/poll.
+        # For now, we won't auto-reconnect here to avoid connection storms.
 
     def _notification_handler(self, _: int, data: bytearray) -> None:
         """Handle BLE notification from the device.
@@ -369,39 +436,49 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
             _LOGGER.error("Error waiting for notifications: %s", err)
 
     async def send_command(self, command: bytes) -> bool:
-        """Send a command to the device."""
+        """Send a command to the device, with connection and retry logic."""
         async with self._data_lock: # Ensure exclusive access for command sending sequence
+            # Check connection and attempt reconnect if necessary
             if not self.is_connected or not self._command_char:
-                _LOGGER.debug("Not connected or command char not found, attempting to connect before sending command to %s", self.device.address)
-                if not await self.connect_and_setup(): # This also acquires the lock
-                    _LOGGER.error("Failed to connect, cannot send command to %s", self.device.address)
+                _LOGGER.debug("Not connected or command char not found for %s. Attempting to connect with backoff.", self.device.address)
+                if not await self._reconnect_with_backoff():
+                    _LOGGER.error("Failed to connect to %s, cannot send command.", self.device.address)
                     return False
             
-            # At this point, self._client and self._command_char should be valid if connect_and_setup succeeded
-            if not self._client or not self._command_char: # Double check after potential connect_and_setup
-                _LOGGER.error("Client or command characteristic still not available after connection attempt for %s", self.device.address)
+            # After attempting to connect, re-check client and char availability
+            if not self._client or not self._command_char:
+                _LOGGER.error("Client or command characteristic not available for %s after connection attempts.", self.device.address)
                 return False
-            
-            client = self._client
-            command_char = self._command_char
 
-        # Release lock before actual I/O operation
-        try:
-            _LOGGER.debug("Sending command to %s: %s", self.device.address, command.hex())
-            await client.write_gatt_char(command_char, command, response=True) # Request response if char supports it
-            _LOGGER.debug("Successfully sent command to %s", self.device.address)
-            return True
-        except asyncio.TimeoutError:
-            _LOGGER.error("Timeout sending command to %s", self.device.address)
-        except BleakError as err:
-            _LOGGER.error("BleakError sending command to %s: %s", self.device.address, err)
-            # If a BleakError occurs, the connection might be compromised.
-            # Schedule a disconnect to clean up and allow re-connection on next attempt.
-            self.hass.async_create_task(self.disconnect())
-        except Exception as err:
-            _LOGGER.error("Unexpected error sending command to %s: %s", self.device.address, err, exc_info=True)
-            self.hass.async_create_task(self.disconnect())
-        return False
+            current_client = self._client
+            current_char = self._command_char
+
+            try:
+                _LOGGER.debug("Sending command %s to %s", command.hex(), self.device.address)
+                await current_client.write_gatt_char(current_char, command, response=False)
+                _LOGGER.debug("Command %s sent successfully to %s", command.hex(), self.device.address)
+                return True
+            except BleakError as err:
+                _LOGGER.warning("BleakError during command %s to %s: %s. Attempting reconnect and retry.", command.hex(), self.device.address, err)
+                if await self._reconnect_with_backoff():
+                    _LOGGER.debug("Reconnected to %s. Retrying command %s.", self.device.address, command.hex())
+                    # Re-verify client and char after reconnect, as they might have been reset
+                    if not self._client or not self._command_char:
+                        _LOGGER.error("Client or command char lost after reconnect for %s. Cannot retry command.", self.device.address)
+                        return False
+                    try:
+                        await self._client.write_gatt_char(self._command_char, command, response=False)
+                        _LOGGER.debug("Command %s sent successfully after reconnect to %s", command.hex(), self.device.address)
+                        return True
+                    except BleakError as e_retry:
+                        _LOGGER.error("BleakError on retry sending command %s to %s: %s", command.hex(), self.device.address, e_retry)
+                        return False
+                else:
+                    _LOGGER.error("Failed to send command %s to %s after BleakError and failed reconnect attempts.", command.hex(), self.device.address)
+                    return False
+            except Exception as e:
+                _LOGGER.error("Unexpected error sending command %s to %s: %s", command.hex(), self.device.address, e, exc_info=True)
+                return False
 
     # Command methods
     async def async_tare(self) -> bool:

@@ -32,12 +32,6 @@ SERVICE_SCHEMA_BASE = vol.Schema(
     extra=vol.ALLOW_EXTRA,
 )
 
-SERVICE_SCHEMA_TARE = SERVICE_SCHEMA_BASE.extend(
-    {
-        vol.Required(vol.Any(ATTR_ENTITY_ID, ATTR_DEVICE_ID)): vol.Any(cv.string, [cv.string]),
-    }
-)
-
 SERVICE_SCHEMA_BEEP_LEVEL = SERVICE_SCHEMA_BASE.extend(
     {
         vol.Required(vol.Any(ATTR_ENTITY_ID, ATTR_DEVICE_ID)): vol.Any(cv.string, [cv.string]),
@@ -126,31 +120,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             _LOGGER.error(f"Error executing Bookoo service for {entity_id}: {ex}")
 
     @callback
-    def tare_service_handler(service_call: ServiceCall) -> None:
-        """Handle tare service calls."""
-        hass.async_create_task(_execute_service(service_call.data.get("entity_id"), lambda coord: coord.async_tare()))
-
-    @callback
-    def start_timer_service_handler(service_call: ServiceCall) -> None:
-        """Handle start timer service calls."""
-        hass.async_create_task(_execute_service(service_call.data.get("entity_id"), lambda coord: coord.async_start_timer()))
-
-    @callback
-    def stop_timer_service_handler(service_call: ServiceCall) -> None:
-        """Handle stop timer service calls."""
-        hass.async_create_task(_execute_service(service_call.data.get("entity_id"), lambda coord: coord.async_stop_timer()))
-
-    @callback
-    def reset_timer_service_handler(service_call: ServiceCall) -> None:
-        """Handle reset timer service calls."""
-        hass.async_create_task(_execute_service(service_call.data.get("entity_id"), lambda coord: coord.async_reset_timer()))
-
-    @callback
-    def tare_and_start_timer_service_handler(service_call: ServiceCall) -> None:
-        """Handle tare and start timer service calls."""
-        hass.async_create_task(_execute_service(service_call.data.get("entity_id"), lambda coord: coord.async_tare_and_start_timer()))
-
-    @callback
     def set_beep_level_service_handler(service_call: ServiceCall) -> None:
         """Handle set beep level service calls."""
         level = service_call.data.get("level", DEFAULT_BEEP_LEVEL)
@@ -169,21 +138,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         hass.async_create_task(_execute_service(service_call.data.get("entity_id"), lambda coord, en: coord.async_set_flow_smoothing(en), enabled))
 
     # Register services with schemas
-    hass.services.async_register(
-        DOMAIN, "tare", tare_service_handler, schema=SERVICE_SCHEMA_TARE
-    )
-    hass.services.async_register(
-        DOMAIN, "start_timer", start_timer_service_handler, schema=SERVICE_SCHEMA_BASE
-    )
-    hass.services.async_register(
-        DOMAIN, "stop_timer", stop_timer_service_handler, schema=SERVICE_SCHEMA_BASE
-    )
-    hass.services.async_register(
-        DOMAIN, "reset_timer", reset_timer_service_handler, schema=SERVICE_SCHEMA_BASE
-    )
-    hass.services.async_register(
-        DOMAIN, "tare_and_start_timer", tare_and_start_timer_service_handler, schema=SERVICE_SCHEMA_BASE
-    )
+    # Services tare, start_timer, stop_timer, reset_timer, tare_and_start_timer are now entity services on buttons.
     hass.services.async_register(
         DOMAIN, "set_beep_level", set_beep_level_service_handler, schema=SERVICE_SCHEMA_BEEP_LEVEL
     )
@@ -243,15 +198,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
 async def async_unload_services(hass: HomeAssistant) -> None:
     """Unload Bookoo BLE services."""
+    # Services tare, start_timer, stop_timer, reset_timer, tare_and_start_timer are now entity services on buttons.
     for service in [
-        "tare", 
-        "start_timer", 
-        "stop_timer", 
-        "reset_timer", 
-        "tare_and_start_timer", 
-        "set_beep_level", 
-        "set_auto_off", 
-        "set_flow_smoothing"
+        "set_beep_level",
+        "set_auto_off",
+        "set_flow_smoothing",
     ]:
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)

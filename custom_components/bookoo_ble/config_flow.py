@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re # Added for MAC validation
 from typing import Any
 
 import voluptuous as vol
@@ -34,6 +35,12 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+def _is_valid_mac_format(address: str) -> bool:
+    """Validate MAC address format (assumes address is already uppercased).
+    Validates XX:XX:XX:XX:XX:XX format with uppercase hex characters.
+    """
+    pattern = re.compile(r'^([0-9A-F]{2}:){5}([0-9A-F]{2})$')
+    return bool(pattern.match(address))
 
 class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Bookoo BLE."""
@@ -204,10 +211,7 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             address = user_input[CONF_ADDRESS].upper()  # Normalize to uppercase
             name = user_input.get(CONF_NAME, DEFAULT_NAME)
 
-            # Basic MAC address validation (can be improved)
-            # Validates XX:XX:XX:XX:XX:XX format after uppercasing
-            if not (isinstance(address, str) and len(address) == 17 and address.count(':') == 5):
-                # Further validation could check for valid hex characters if needed
+            if not _is_valid_mac_format(address):
                 errors["base"] = "invalid_mac_address"
             else:
                 await self.async_set_unique_id(address, raise_on_progress=False)
