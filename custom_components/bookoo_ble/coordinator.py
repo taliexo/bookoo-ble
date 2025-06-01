@@ -168,94 +168,96 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
 
     async def connect_and_setup(self) -> bool:
         """Connect to the device and set up notifications."""
-        if self._client and self._client.is_connected:
-            return True
-            
-        ble_device = self.device.service_info.device
-        if not ble_device:
-            _LOGGER.error("No BLEDevice available for %s", self.device.address)
-            return False
-            
-        try:
-            _LOGGER.debug("Connecting to %s", self.device.address)
-            self._client = await establish_connection(
-                BleakClientWithServiceCache,
-                ble_device,
-                self.device.address,
-                disconnected_callback=self._handle_disconnect,
-                timeout=10.0,
-            )
-            
-            _LOGGER.debug("Connected to %s", self.device.address)
-            
-            # Get the command and weight characteristics
-            for service in self._client.services:
-                if service.uuid.lower() == SERVICE_UUID.lower():
-                    for char in service.characteristics:
-                        if char.uuid.lower() == CHAR_COMMAND_UUID.lower():
-                            self._command_char = char
-                        elif char.uuid.lower() == CHAR_WEIGHT_UUID.lower():
-                            self._weight_char = char
-            
-            if not self._command_char:
-                _LOGGER.error("Command characteristic not found on %s", self.device.address)
-                await self._client.disconnect()
+        async with self._data_lock:
+            if self._client and self._client.is_connected:
+                return True
+                
+            ble_device = self.device.service_info.device
+            if not ble_device:
+                _LOGGER.error("No BLEDevice available for %s", self.device.address)
                 return False
                 
-            if not self._weight_char:
-                _LOGGER.error("Weight characteristic not found on %s", self.device.address)
-                await self._client.disconnect()
-                return False
+            try:
+                _LOGGER.debug("Connecting to %s", self.device.address)
+                self._client = await establish_connection(
+                    BleakClientWithServiceCache,
+                    ble_device,
+                    self.device.address,
+                    disconnected_callback=self._handle_disconnect,
+                    timeout=10.0,
+                )
                 
-            # Set up notification handlers
-            self._disconnect_event.clear()
-            
-            # Start notifications for weight data
-            await self._client.start_notify(
-                self._weight_char, self._notification_handler
-            )
-            
-            # Start notifications for command/status data
-            await self._client.start_notify(
-                self._command_char, self._notification_handler
-            )
-            
-            # Wait for first notification or timeout
-            self._notification_task = asyncio.create_task(
-                self._wait_for_notifications()
-            )
-            
-            return True
-            
-        except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
-            _LOGGER.error("Error connecting to %s: %s", self.device.address, err)
-            if self._client:
-                try:
+                _LOGGER.debug("Connected to %s", self.device.address)
+                
+                # Get the command and weight characteristics
+                for service in self._client.services:
+                    if service.uuid.lower() == SERVICE_UUID.lower():
+                        for char in service.characteristics:
+                            if char.uuid.lower() == CHAR_COMMAND_UUID.lower():
+                                self._command_char = char
+                            elif char.uuid.lower() == CHAR_WEIGHT_UUID.lower():
+                                self._weight_char = char
+                
+                if not self._command_char:
+                    _LOGGER.error("Command characteristic not found on %s", self.device.address)
                     await self._client.disconnect()
-                except Exception:  # pylint: disable=broad-except
-                    pass
-                self._client = None
-            return False
+                    return False
+                    
+                if not self._weight_char:
+                    _LOGGER.error("Weight characteristic not found on %s", self.device.address)
+                    await self._client.disconnect()
+                    return False
+                    
+                # Set up notification handlers
+                self._disconnect_event.clear()
+                
+                # Start notifications for weight data
+                await self._client.start_notify(
+                    self._weight_char, self._notification_handler
+                )
+                
+                # Start notifications for command/status data
+                await self._client.start_notify(
+                    self._command_char, self._notification_handler
+                )
+                
+                # Wait for first notification or timeout
+                self._notification_task = asyncio.create_task(
+                    self._wait_for_notifications()
+                )
+                
+                return True
+                
+            except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
+                _LOGGER.error("Error connecting to %s: %s", self.device.address, err)
+                if self._client:
+                    try:
+                        await self._client.disconnect()
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+                    self._client = None
+                return False
 
     async def disconnect(self) -> None:
         """Disconnect from the device."""
-        if self._notification_task:
-            self._notification_task.cancel()
-            self._notification_task = None
-            
-        if self._client and self._client.is_connected:
-            try:
-                if self._weight_char:
-                    await self._client.stop_notify(self._weight_char)
-                if self._command_char:
-                    await self._client.stop_notify(self._command_char)
-                await self._client.disconnect()
-            except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
-                _LOGGER.error("Error disconnecting from %s: %s", self.device.address, err)
-            finally:
-                self._client = None
-                self._command_char = None
-                self._weight_char = None
+        async with self._data_lock:
+            if self._notification_task:
+                self._notification_task.cancel()
+                self._notification_task = None
+                
+            if self._client and self._client.is_connected:
+                try:
+                    if self._weight_char:
+                        await self._client.stop_notify(self._weight_char)
+                    if self._command_char:
+                        await self._client.stop_notify(self._command_char)
+                    await self._client.disconnect()
+                except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
+                    _LOGGER.error("Error disconnecting from %s: %s", self.device.address, err)
+                finally:
+                    self._client = None
+                    self._command_char = None
+                    self._weight_char = None
 
     def _handle_disconnect(self, _: BLEDevice) -> None:
         """Handle disconnection event."""
@@ -268,15 +270,28 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
         asyncio.create_task(self.connect_and_setup())
 
     def _notification_handler(self, _: int, data: bytearray) -> None:
-        """Handle BLE notification from the device."""
+        """Handle BLE notification from the device.
+        
+        This handles notifications from both characteristics:
+        - Weight data on 0xFF11 characteristic (data[1]=0x0B)
+        - Timer status on 0xFF12 characteristic (data[0]=0x03, data[1]=0x0D)
+        """
         data_bytes = bytes(data)
         
+        # Log the notification for debugging
+        _LOGGER.debug(
+            "Received notification: %s, length: %d", 
+            data_bytes.hex(), 
+            len(data_bytes)
+        )
+        
         # Update the internal state via the passive coordinator
+        # This is thread-safe as it does not modify our connection state
         self.passive_coordinator.processor.update_from_notification(
             self.device.service_info, data_bytes
         )
         
-        # Set flag to indicate we received data
+        # Set flag to indicate we received data - atomic operation
         self._update_received = True
 
     async def _wait_for_notifications(self) -> None:
@@ -307,13 +322,29 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
 
     async def send_command(self, command: bytes) -> bool:
         """Send a command to the device."""
-        if not self._client or not self._client.is_connected or not self._command_char:
+        # First acquire the lock to check connection state
+        async with self._data_lock:
+            if not self._client or not self._client.is_connected or not self._command_char:
+                # Release the lock before attempting to connect, as connect_and_setup acquires it
+                needs_connect = True
+            else:
+                needs_connect = False
+                client = self._client
+                command_char = self._command_char
+        
+        # If needed, connect first (this will acquire the lock internally)
+        if needs_connect:
             if not await self.connect_and_setup():
                 return False
-                
+            # Get the updated references after connection
+            async with self._data_lock:
+                client = self._client
+                command_char = self._command_char
+        
+        # With valid references, send the command (without holding the lock during I/O)
         try:
             async with asyncio.timeout(5):  # 5 second timeout
-                await self._client.write_gatt_char(self._command_char, command)
+                await client.write_gatt_char(command_char, command)
                 _LOGGER.debug("Sent command: %s", command.hex())
                 return True
         except asyncio.TimeoutError:
@@ -321,6 +352,12 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
             return False
         except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
             _LOGGER.error("Error sending command to %s: %s", self.device.address, err)
+            # Mark connection as failed
+            async with self._data_lock:
+                if self._client is client:  # Only clear if it's still the same client
+                    self._client = None
+                    self._command_char = None
+                    self._weight_char = None
             return False
 
     # Command methods

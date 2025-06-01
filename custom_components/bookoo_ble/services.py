@@ -47,10 +47,19 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     async def _execute_service(entity_id_or_list: str | list[str], action: Callable[..., Awaitable[bool]], *args, **kwargs):
         """Execute a service with the given action on the coordinator."""
-        entity_id = entity_id_or_list[0] if isinstance(entity_id_or_list, list) else entity_id_or_list
-        if not entity_id:
+        # Validate entity_id input
+        if not entity_id_or_list:
             _LOGGER.error("No entity_id provided for service call")
             return
+            
+        # Process single entity ID or pick the first from a list if provided
+        if isinstance(entity_id_or_list, list):
+            if not entity_id_or_list:  # Check for empty list
+                _LOGGER.error("Empty entity_id list provided for service call")
+                return
+            entity_id = entity_id_or_list[0]  # Take the first entity ID
+        else:
+            entity_id = entity_id_or_list
         
         try:
             async with asyncio.timeout(10):  # 10 second timeout for service execution
