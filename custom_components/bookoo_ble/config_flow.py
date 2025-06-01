@@ -20,7 +20,6 @@ from homeassistant.helpers.selector import (
     NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
-    SelectSelectorOption,
 )
 
 from .const import (
@@ -125,12 +124,10 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         device_options = []
         for address, discovery_info in self._discovered_devices.items():
             name = discovery_info.name or "Unknown"
-            device_options.append(
-                SelectSelectorOption(
-                    value=address,
-                    label=f"{name} ({address})",
-                )
-            )
+            device_options.append({
+                "value": address,
+                "label": f"{name} ({address})"
+            })
 
         # Create the form schema
         schema = vol.Schema(
