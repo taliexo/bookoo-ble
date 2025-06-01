@@ -57,7 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER,
         address=address,
         mode=BluetoothScanningMode.ACTIVE,
-        update_processor=passive_processor,
+        processor=passive_processor,
     )
     
     # Create the device coordinator
