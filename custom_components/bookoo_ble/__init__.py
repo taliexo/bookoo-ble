@@ -1,25 +1,35 @@
 """The Bookoo BLE integration."""
-import logging
-from typing import Any, Dict, Optional
+from __future__ import annotations
 
-from homeassistant.components.bluetooth import BluetoothScanningMode
+import logging
+from typing import Final
+
+from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth.passive_update_processor import (
     PassiveBluetoothProcessorCoordinator,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, CONF_NAME, Platform
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .const import DOMAIN, MANUFACTURER
 from .coordinator import BookooDeviceCoordinator, BookooPassiveBluetoothDataProcessor
 from .models import BookooBluetoothDeviceData, BookooData
 from .services import async_setup_services, async_unload_services
 
+# List of platforms to set up
+PLATFORMS: Final[list[Platform]] = [
+    Platform.SENSOR,
+    Platform.BUTTON,
+    Platform.NUMBER,
+    Platform.SWITCH,
+    Platform.BINARY_SENSOR,
+]
+
 _LOGGER = logging.getLogger(__name__)
-
-PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.SWITCH, Platform.BUTTON]
-
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Bookoo BLE component."""
@@ -32,57 +42,48 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Bookoo BLE from a config entry."""
+    hass.data.setdefault(DOMAIN, {})
+    
+    # Get device info from config entry
     address = entry.data[CONF_ADDRESS]
     name = entry.data[CONF_NAME]
     
-    _LOGGER.debug("Setting up Bookoo BLE for %s (%s)", name, address)
-
-    # Create initial device data
-    device_data = BookooBluetoothDeviceData(
-        address=address,
-        device_name=name,
-        model="Bookoo Mini Scale",
-        service_info=None,  # Will be set when we receive notifications
-        data=BookooData(),
-        manufacturer=MANUFACTURER,
+    # Create device data and processor
+    processor = BookooPassiveBluetoothDataProcessor(
+        lambda update: hass.async_create_task(processor.async_update_data(update))
     )
     
-    # Create the passive update processor and coordinator
-    passive_processor = BookooPassiveBluetoothDataProcessor(
-        sensor_update_callback=lambda data_update: None,  # Will be updated by coordinator
-    )
-    
-    # Home Assistant ≥2024.12 signature change:
-    #   • ``processor`` kw‑arg removed
-    #   • ``update_method`` kw‑arg is now mandatory
+    # Create passive coordinator
     passive_coordinator = PassiveBluetoothProcessorCoordinator(
         hass,
         _LOGGER,
         address=address,
-        mode=BluetoothScanningMode.ACTIVE,
-        update_method=lambda service_info: None,  # Bookoo scale adverts carry no sensor data
+        mode=bluetooth.BluetoothScanningMode.ACTIVE,
+        update_method=processor,
     )
-
-    # Register the processor explicitly under the new API
-    passive_coordinator.add_processor(passive_processor)
-
-    # Compat shim: existing helper code still expects ``processor`` attribute
-    passive_coordinator.processor = passive_processor
     
-    # Create the device coordinator
+    # Create device coordinator
     device_coordinator = BookooDeviceCoordinator(
-        hass, device_data, passive_coordinator
+        hass=hass,
+        device=BookooBluetoothDeviceData(
+            address=address,
+            device_name=name,
+            model="Bookoo Scale",
+            service_info=None,
+            data=BookooData(),
+        ),
+        passive_coordinator=passive_coordinator,
     )
     
-    # Connect to the device
-    if not await device_coordinator.connect_and_setup():
-        _LOGGER.warning("Could not connect to Bookoo device %s (%s)", name, address)
-    
-    # Store coordinators in hass.data
+    # Store coordinators
     hass.data[DOMAIN][entry.entry_id] = {
         "device_coordinator": device_coordinator,
         "passive_coordinator": passive_coordinator,
     }
+    
+    # Set up services if not already set up
+    if len(hass.data[DOMAIN]) == 1:  # Only set up services once
+        await async_setup_services(hass)
     
     # Register the device in the device registry
     device_registry = dr.async_get(hass)
@@ -94,7 +95,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="Bookoo Mini Scale",
     )
     
-    # Apply settings from options or config data
+    # Set up platforms
     current_config = {**entry.data, **entry.options}
     beep_level = current_config.get("beep_level")
     auto_off_minutes = current_config.get("auto_off_minutes")
@@ -131,7 +132,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Disconnect the device coordinator
         await device_coordinator.disconnect()
         
-        # If this is the last entry, unload services
+        # Unload services if this was the last entry
         if not hass.data[DOMAIN]:
             await async_unload_services(hass)
     

@@ -4,14 +4,17 @@ import logging
 from collections.abc import Callable
 from typing import Any, Dict, Optional, Union
 
+from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak.backends.service import BleakGATTCharacteristic
 from bleak.exc import BleakError
-from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS, BleakClientWithServiceCache, establish_connection
+from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
-    BluetoothScanningMode,
     BluetoothServiceInfoBleak,
+    async_ble_device_from_address,
+    BLEAK_RECONNECT_EXCEPTIONS,
 )
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.components.bluetooth.passive_update_processor import (
     PassiveBluetoothDataProcessor,
     PassiveBluetoothDataUpdate,
@@ -83,6 +86,11 @@ class BookooPassiveBluetoothDataProcessor(PassiveBluetoothDataProcessor):
         
         parsed_data = BookooBluetoothParser.parse_notification(data)
         if not parsed_data:
+            _LOGGER.debug(
+                "Received notification from %s that was not parsed into usable data: %s",
+                service_info.address,
+                data.hex(),
+            )
             return
             
         # Update our local data
@@ -150,124 +158,164 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
         super().__init__(
             hass,
             _LOGGER,
-            name=f"{device.device_name} ({device.address})",
+            name=f"{DOMAIN}_{device.address}", # Use a consistent naming scheme
+            # No update_interval needed as we rely on notifications and on-demand commands
         )
         self.device = device
         self.passive_coordinator = passive_coordinator
-        self._client: Optional[BleakClientWithServiceCache] = None
-        self._command_char: Optional[BleakGATTCharacteristic] = None
-        self._weight_char: Optional[BleakGATTCharacteristic] = None
-        self._notification_task: Optional[asyncio.Task] = None
+        self._client: BleakClient | None = None
+        self._command_char: BleakGATTCharacteristic | None = None
+        self._weight_char: BleakGATTCharacteristic | None = None
+        self._notification_task: asyncio.Task | None = None
         self._disconnect_event = asyncio.Event()
-        self._data_lock = asyncio.Lock()
-        self._update_received = False
+        self._data_lock = asyncio.Lock() # Protects _client and char access
+        self._is_connected = False
+        self._expected_disconnect = False # Flag to differentiate expected vs unexpected disconnects
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True if the client is currently connected."""
+        return self._client is not None and self._client.is_connected
 
     async def _async_update_data(self) -> None:
-        """No regular updates needed - we use notifications."""
+        """Fetch data from BLE device. Not used if relying on notifications primarily."""
+        # This method would be used if we were polling the device.
+        # For now, we rely on notifications and on-demand commands.
+        # If connection is lost, this could be a place to attempt reconnection periodically.
+        _LOGGER.debug("Attempting to ensure connection for %s", self.device.address)
+        if not await self.connect_and_setup():
+            _LOGGER.warning("Failed to ensure connection for %s", self.device.address)
         return None
+
+    async def async_config_entry_first_refresh(self) -> None:
+        """Connect to the device and setup notifications on first refresh."""
+        # This is called by HA after the config entry is setup.
+        # We use it to establish the initial connection.
+        if not await self.connect_and_setup():
+            raise ConfigEntryNotReady(f"Could not connect to {self.device.device_name}")
 
     async def connect_and_setup(self) -> bool:
         """Connect to the device and set up notifications."""
         async with self._data_lock:
             if self._client and self._client.is_connected:
+                _LOGGER.debug("Already connected to %s", self.device.address)
                 return True
-                
-            ble_device = self.device.service_info.device
+
+            _LOGGER.debug("Attempting to connect to %s", self.device.address)
+            ble_device = bluetooth.async_ble_device_from_address(self.hass, self.device.address, connectable=True)
             if not ble_device:
-                _LOGGER.error("No BLEDevice available for %s", self.device.address)
+                _LOGGER.warning("Device %s not found by Bluetooth manager", self.device.address)
                 return False
-                
+
+            client = BleakClient(ble_device, disconnected_callback=self._handle_disconnect)
+
             try:
-                _LOGGER.debug("Connecting to %s", self.device.address)
-                self._client = await establish_connection(
-                    BleakClientWithServiceCache,
-                    ble_device,
-                    self.device.address,
-                    disconnected_callback=self._handle_disconnect,
-                    timeout=10.0,
-                )
-                
-                _LOGGER.debug("Connected to %s", self.device.address)
-                
-                # Get the command and weight characteristics
-                for service in self._client.services:
-                    if service.uuid.lower() == SERVICE_UUID.lower():
-                        for char in service.characteristics:
-                            if char.uuid.lower() == CHAR_COMMAND_UUID.lower():
-                                self._command_char = char
-                            elif char.uuid.lower() == CHAR_WEIGHT_UUID.lower():
-                                self._weight_char = char
-                
+                await client.connect(timeout=10.0)
+                _LOGGER.info("Successfully connected to %s", self.device.address)
+                self._client = client
+                self._is_connected = True
+                self._expected_disconnect = False
+
+                # Get services and characteristics
+                svcs = await client.get_services()
+                self._command_char = svcs.get_characteristic(CHAR_COMMAND_UUID)
+                self._weight_char = svcs.get_characteristic(CHAR_WEIGHT_UUID)
+
                 if not self._command_char:
-                    _LOGGER.error("Command characteristic not found on %s", self.device.address)
-                    await self._client.disconnect()
+                    _LOGGER.error("Command characteristic %s not found on %s", CHAR_COMMAND_UUID, self.device.address)
+                    await self.disconnect() # Clean disconnect
                     return False
-                    
                 if not self._weight_char:
-                    _LOGGER.error("Weight characteristic not found on %s", self.device.address)
-                    await self._client.disconnect()
+                    _LOGGER.error("Weight characteristic %s not found on %s", CHAR_WEIGHT_UUID, self.device.address)
+                    await self.disconnect() # Clean disconnect
                     return False
-                    
-                # Set up notification handlers
+
+                # Start notifications
                 self._disconnect_event.clear()
+                await client.start_notify(self._weight_char, self._notification_handler)
+                _LOGGER.debug("Started notifications for weight char on %s", self.device.address)
+                await client.start_notify(self._command_char, self._notification_handler)
+                _LOGGER.debug("Started notifications for command char on %s", self.device.address)
                 
-                # Start notifications for weight data
-                await self._client.start_notify(
-                    self._weight_char, self._notification_handler
-                )
+                # This task was for waiting for initial notifications, can be removed or adapted
+                # if self._notification_task:
+                #    self._notification_task.cancel()
+                # self._notification_task = asyncio.create_task(self._wait_for_notifications())
                 
-                # Start notifications for command/status data
-                await self._client.start_notify(
-                    self._command_char, self._notification_handler
-                )
-                
-                # Wait for first notification or timeout
-                self._notification_task = asyncio.create_task(
-                    self._wait_for_notifications()
-                )
-                
+                self.async_update_listeners() # Notify entities about connection status change
                 return True
-                
-            except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
+
+            except (BleakError, asyncio.TimeoutError, *BLEAK_RECONNECT_EXCEPTIONS) as err:
                 _LOGGER.error("Error connecting to %s: %s", self.device.address, err)
-                if self._client:
-                    try:
-                        await self._client.disconnect()
-                    except Exception:  # pylint: disable=broad-except
-                        pass
-                    self._client = None
+                await self.disconnect() # Ensure client is cleaned up if connect fails
+                return False
+            except Exception as err: # Catch any other unexpected errors during connect
+                _LOGGER.error("Unexpected error connecting to %s: %s", self.device.address, err, exc_info=True)
+                await self.disconnect()
                 return False
 
     async def disconnect(self) -> None:
-        """Disconnect from the device."""
+        """Disconnect from the device and clean up resources."""
+        _LOGGER.debug("Disconnecting from %s", self.device.address)
         async with self._data_lock:
+            self._expected_disconnect = True # Mark that this disconnect is intentional
+            client = self._client
+            self._client = None # Clear client immediately
+            self._is_connected = False
+            self._command_char = None
+            self._weight_char = None
+
             if self._notification_task:
                 self._notification_task.cancel()
                 self._notification_task = None
-                
-            if self._client and self._client.is_connected:
-                try:
-                    if self._weight_char:
-                        await self._client.stop_notify(self._weight_char)
-                    if self._command_char:
-                        await self._client.stop_notify(self._command_char)
-                    await self._client.disconnect()
-                except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
-                    _LOGGER.error("Error disconnecting from %s: %s", self.device.address, err)
-                finally:
-                    self._client = None
-                    self._command_char = None
-                    self._weight_char = None
 
-    def _handle_disconnect(self, _: BLEDevice) -> None:
-        """Handle disconnection event."""
-        _LOGGER.debug("Device %s disconnected", self.device.address)
-        self._disconnect_event.set()
-        self._client = None
-        self._command_char = None
-        self._weight_char = None
-        # Schedule reconnection
-        asyncio.create_task(self.connect_and_setup())
+            if client and client.is_connected:
+                try:
+                    # Stop notifications before disconnecting if characteristics are known
+                    # This might fail if connection is already lost, so wrap in try-except
+                    try:
+                        if client.services.get_characteristic(CHAR_WEIGHT_UUID):
+                             await client.stop_notify(CHAR_WEIGHT_UUID)
+                        if client.services.get_characteristic(CHAR_COMMAND_UUID):
+                             await client.stop_notify(CHAR_COMMAND_UUID)
+                    except BleakError as e:
+                        _LOGGER.debug("BleakError stopping notifications during disconnect: %s", e)
+                    
+                    await client.disconnect()
+                    _LOGGER.info("Successfully disconnected from %s", self.device.address)
+                except BleakError as err:
+                    _LOGGER.error("Error during disconnect from %s: %s", self.device.address, err)
+            elif client: # Client exists but not connected, ensure it's cleaned up
+                 _LOGGER.debug("Client for %s was not connected, ensuring cleanup.", self.device.address)
+                 try:
+                     await client.disconnect() # Attempt disconnect anyway to be safe
+                 except Exception:
+                     pass # Ignore errors if already disconnected or uninitialized
+        self.async_update_listeners() # Notify entities
+
+    def _handle_disconnect(self, client: BleakClient) -> None:
+        """Handle Bluetooth disconnection."""
+        if self._expected_disconnect:
+            _LOGGER.debug("Expected disconnect from %s", client.address)
+            self._expected_disconnect = False # Reset flag
+            return
+
+        _LOGGER.warning("Device %s disconnected unexpectedly", client.address)
+        # Do not attempt to use the 'client' object here as it's disconnected.
+        # Clear our state and notify listeners.
+        async def clear_state_and_notify(): # Use async def for hass.add_job
+            async with self._data_lock:
+                self._client = None
+                self._is_connected = False
+                self._command_char = None
+                self._weight_char = None
+            self.async_update_listeners()
+            # Optionally, schedule a reconnect attempt or rely on next command/poll
+            # For now, we won't auto-reconnect here to avoid connection storms.
+            # Reconnection will be attempted on next service call or if _async_update_data is polled.
+
+        # Schedule the state clearing and listener update in the HA event loop
+        self.hass.async_create_task(clear_state_and_notify())
 
     def _notification_handler(self, _: int, data: bytearray) -> None:
         """Handle BLE notification from the device.
@@ -322,43 +370,38 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
 
     async def send_command(self, command: bytes) -> bool:
         """Send a command to the device."""
-        # First acquire the lock to check connection state
-        async with self._data_lock:
-            if not self._client or not self._client.is_connected or not self._command_char:
-                # Release the lock before attempting to connect, as connect_and_setup acquires it
-                needs_connect = True
-            else:
-                needs_connect = False
-                client = self._client
-                command_char = self._command_char
-        
-        # If needed, connect first (this will acquire the lock internally)
-        if needs_connect:
-            if not await self.connect_and_setup():
+        async with self._data_lock: # Ensure exclusive access for command sending sequence
+            if not self.is_connected or not self._command_char:
+                _LOGGER.debug("Not connected or command char not found, attempting to connect before sending command to %s", self.device.address)
+                if not await self.connect_and_setup(): # This also acquires the lock
+                    _LOGGER.error("Failed to connect, cannot send command to %s", self.device.address)
+                    return False
+            
+            # At this point, self._client and self._command_char should be valid if connect_and_setup succeeded
+            if not self._client or not self._command_char: # Double check after potential connect_and_setup
+                _LOGGER.error("Client or command characteristic still not available after connection attempt for %s", self.device.address)
                 return False
-            # Get the updated references after connection
-            async with self._data_lock:
-                client = self._client
-                command_char = self._command_char
-        
-        # With valid references, send the command (without holding the lock during I/O)
+            
+            client = self._client
+            command_char = self._command_char
+
+        # Release lock before actual I/O operation
         try:
-            async with asyncio.timeout(5):  # 5 second timeout
-                await client.write_gatt_char(command_char, command)
-                _LOGGER.debug("Sent command: %s", command.hex())
-                return True
+            _LOGGER.debug("Sending command to %s: %s", self.device.address, command.hex())
+            await client.write_gatt_char(command_char, command, response=True) # Request response if char supports it
+            _LOGGER.debug("Successfully sent command to %s", self.device.address)
+            return True
         except asyncio.TimeoutError:
             _LOGGER.error("Timeout sending command to %s", self.device.address)
-            return False
-        except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
-            _LOGGER.error("Error sending command to %s: %s", self.device.address, err)
-            # Mark connection as failed
-            async with self._data_lock:
-                if self._client is client:  # Only clear if it's still the same client
-                    self._client = None
-                    self._command_char = None
-                    self._weight_char = None
-            return False
+        except BleakError as err:
+            _LOGGER.error("BleakError sending command to %s: %s", self.device.address, err)
+            # If a BleakError occurs, the connection might be compromised.
+            # Schedule a disconnect to clean up and allow re-connection on next attempt.
+            self.hass.async_create_task(self.disconnect())
+        except Exception as err:
+            _LOGGER.error("Unexpected error sending command to %s: %s", self.device.address, err, exc_info=True)
+            self.hass.async_create_task(self.disconnect())
+        return False
 
     # Command methods
     async def async_tare(self) -> bool:

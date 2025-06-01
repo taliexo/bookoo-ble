@@ -1,7 +1,9 @@
 """Number platform for Bookoo BLE integration."""
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable
 
 from homeassistant.components.number import (
     NumberEntity,
@@ -11,13 +13,14 @@ from homeassistant.components.number import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.entity import EntityCategory, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
     ATTR_BEEP_LEVEL,
     ATTR_AUTO_OFF_MINUTES,
+    MANUFACTURER,
 )
 from .coordinator import BookooDeviceCoordinator
 
@@ -96,16 +99,16 @@ class BookooNumber(NumberEntity):
         self.entity_description = description
         self._coordinator = coordinator
         
-        # Set the unique ID using the device address and entity key
-        self._attr_unique_id = f"{coordinator.device.address}_{description.key}"
+        # Set the unique ID using the domain, device address, and entity key
+        self._attr_unique_id = f"{DOMAIN}_{coordinator.device.address}_{description.key}"
         
         # Link to the device
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.device.address)},
-            "name": coordinator.device.device_name,
-            "manufacturer": coordinator.device.manufacturer,
-            "model": coordinator.device.model,
-        }
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, coordinator.device.address)},
+            name=coordinator.device.device_name,
+            manufacturer=MANUFACTURER, # Use constant
+            model=coordinator.device.model, # Or a constant like "Bookoo Mini Scale"
+        )
         
         # Set entity properties
         self._attr_has_entity_name = True

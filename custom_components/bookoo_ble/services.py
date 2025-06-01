@@ -1,21 +1,67 @@
 """Services for Bookoo BLE integration."""
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Dict, Any, Callable, Awaitable, cast
+from typing import Any, Callable, Awaitable, cast
 
 import voluptuous as vol
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er, config_validation as cv
+from homeassistant.helpers.entity_platform import async_get_platforms
 
 from .const import (
     DOMAIN,
     DEFAULT_BEEP_LEVEL,
     DEFAULT_AUTO_OFF_MINUTES,
     DEFAULT_FLOW_SMOOTHING,
+    ATTR_ENTITY_ID,
+    ATTR_DEVICE_ID,
 )
 from .coordinator import BookooDeviceCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
+# Service schemas
+SERVICE_SCHEMA_BASE = vol.Schema(
+    {
+        vol.Exclusive(ATTR_ENTITY_ID, "id"): cv.entity_id,
+        vol.Exclusive(ATTR_DEVICE_ID, "id"): vol.All(cv.string, vol.Lower),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+SERVICE_SCHEMA_TARE = SERVICE_SCHEMA_BASE.extend(
+    {
+        vol.Required(vol.Any(ATTR_ENTITY_ID, ATTR_DEVICE_ID)): vol.Any(cv.string, [cv.string]),
+    }
+)
+
+SERVICE_SCHEMA_BEEP_LEVEL = SERVICE_SCHEMA_BASE.extend(
+    {
+        vol.Required(vol.Any(ATTR_ENTITY_ID, ATTR_DEVICE_ID)): vol.Any(cv.string, [cv.string]),
+        vol.Required("level", default=DEFAULT_BEEP_LEVEL): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=5)
+        ),
+    }
+)
+
+SERVICE_SCHEMA_AUTO_OFF = SERVICE_SCHEMA_BASE.extend(
+    {
+        vol.Required(vol.Any(ATTR_ENTITY_ID, ATTR_DEVICE_ID)): vol.Any(cv.string, [cv.string]),
+        vol.Required("minutes", default=DEFAULT_AUTO_OFF_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=30)
+        ),
+    }
+)
+
+SERVICE_SCHEMA_FLOW_SMOOTHING = SERVICE_SCHEMA_BASE.extend(
+    {
+        vol.Required(vol.Any(ATTR_ENTITY_ID, ATTR_DEVICE_ID)): vol.Any(cv.string, [cv.string]),
+        vol.Required("enabled", default=DEFAULT_FLOW_SMOOTHING): cv.boolean,
+    }
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +109,15 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         try:
             async with asyncio.timeout(10):  # 10 second timeout for service execution
                 coordinator = await get_bookoo_coordinator_from_entity(entity_id)
+                if not coordinator.is_connected:
+                    _LOGGER.warning(
+                        "Service %s called for %s, but device is not connected.",
+                        action.__name__,
+                        coordinator.device.address # or entity_id if preferred for logging
+                    )
+                    # Optionally, you could return here or raise an error to prevent further action
+                    # For now, we'll let it proceed, as send_command in coordinator will try to connect.
+                
                 if not await action(coordinator, *args, **kwargs):
                     _LOGGER.error(f"Failed to execute service {action.__name__} for {entity_id}")
         except asyncio.TimeoutError:
@@ -113,50 +168,77 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         enabled = service_call.data.get("enabled", DEFAULT_FLOW_SMOOTHING)
         hass.async_create_task(_execute_service(service_call.data.get("entity_id"), lambda coord, en: coord.async_set_flow_smoothing(en), enabled))
 
-    # Register services with improved schemas
+    # Register services with schemas
     hass.services.async_register(
-        DOMAIN, "tare", tare_service_handler, schema=vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
-        })
+        DOMAIN, "tare", tare_service_handler, schema=SERVICE_SCHEMA_TARE
     )
     hass.services.async_register(
-        DOMAIN, "start_timer", start_timer_service_handler, schema=vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
-        })
+        DOMAIN, "start_timer", start_timer_service_handler, schema=SERVICE_SCHEMA_BASE
     )
     hass.services.async_register(
-        DOMAIN, "stop_timer", stop_timer_service_handler, schema=vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
-        })
+        DOMAIN, "stop_timer", stop_timer_service_handler, schema=SERVICE_SCHEMA_BASE
     )
     hass.services.async_register(
-        DOMAIN, "reset_timer", reset_timer_service_handler, schema=vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
-        })
+        DOMAIN, "reset_timer", reset_timer_service_handler, schema=SERVICE_SCHEMA_BASE
     )
     hass.services.async_register(
-        DOMAIN, "tare_and_start_timer", tare_and_start_timer_service_handler, schema=vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
-        })
+        DOMAIN, "tare_and_start_timer", tare_and_start_timer_service_handler, schema=SERVICE_SCHEMA_BASE
     )
     hass.services.async_register(
-        DOMAIN, "set_beep_level", set_beep_level_service_handler, schema=vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
-            vol.Required("level"): vol.All(vol.Coerce(int), vol.Range(min=0, max=5)),
-        })
+        DOMAIN, "set_beep_level", set_beep_level_service_handler, schema=SERVICE_SCHEMA_BEEP_LEVEL
     )
     hass.services.async_register(
-        DOMAIN, "set_auto_off", set_auto_off_service_handler, schema=vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
-            vol.Required("minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
-        })
+        DOMAIN, "set_auto_off", set_auto_off_service_handler, schema=SERVICE_SCHEMA_AUTO_OFF
     )
     hass.services.async_register(
-        DOMAIN, "set_flow_smoothing", set_flow_smoothing_service_handler, schema=vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
-            vol.Required("enabled"): cv.boolean,
-        })
+        DOMAIN, "set_flow_smoothing", set_flow_smoothing_service_handler, 
+        schema=SERVICE_SCHEMA_FLOW_SMOOTHING
     )
+    
+    # Register services in the UI
+    platform = next((p for p in async_get_platforms(hass, DOMAIN) 
+                   if p.domain == "sensor"), None)
+    if platform:
+        platform.async_register_entity_service(
+            "tare",
+            SERVICE_SCHEMA_TARE,
+            "async_tare",
+        )
+        platform.async_register_entity_service(
+            "start_timer",
+            SERVICE_SCHEMA_BASE,
+            "async_start_timer",
+        )
+        platform.async_register_entity_service(
+            "stop_timer",
+            SERVICE_SCHEMA_BASE,
+            "async_stop_timer",
+        )
+        platform.async_register_entity_service(
+            "reset_timer",
+            SERVICE_SCHEMA_BASE,
+            "async_reset_timer",
+        )
+        platform.async_register_entity_service(
+            "tare_and_start_timer",
+            SERVICE_SCHEMA_BASE,
+            "async_tare_and_start_timer",
+        )
+        platform.async_register_entity_service(
+            "set_beep_level",
+            SERVICE_SCHEMA_BEEP_LEVEL,
+            "async_set_beep_level",
+        )
+        platform.async_register_entity_service(
+            "set_auto_off",
+            SERVICE_SCHEMA_AUTO_OFF,
+            "async_set_auto_off_minutes",
+        )
+        platform.async_register_entity_service(
+            "set_flow_smoothing",
+            SERVICE_SCHEMA_FLOW_SMOOTHING,
+            "async_set_flow_smoothing",
+        )
 
 
 async def async_unload_services(hass: HomeAssistant) -> None:

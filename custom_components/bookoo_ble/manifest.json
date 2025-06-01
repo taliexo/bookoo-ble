@@ -6,7 +6,8 @@
   "codeowners": ["@taliexo"],
   "requirements": [],
   "dependencies": ["bluetooth"],
-  "version": "0.5.0",
+  "version": "0.6.0",
+  "homeassistant": "2024.1.0",
   "iot_class": "local_push",
   "config_flow": true,
   "bluetooth": [

@@ -4,7 +4,8 @@ tare:
   target:
     entity:
       integration: bookoo_ble
-      domain: sensor
+    device:
+      integration: bookoo_ble
   fields: {}
 
 start_timer:
@@ -13,7 +14,8 @@ start_timer:
   target:
     entity:
       integration: bookoo_ble
-      domain: sensor
+    device:
+      integration: bookoo_ble
   fields: {}
 
 stop_timer:
@@ -22,7 +24,8 @@ stop_timer:
   target:
     entity:
       integration: bookoo_ble
-      domain: sensor
+    device:
+      integration: bookoo_ble
   fields: {}
 
 reset_timer:
@@ -31,7 +34,8 @@ reset_timer:
   target:
     entity:
       integration: bookoo_ble
-      domain: sensor
+    device:
+      integration: bookoo_ble
   fields: {}
 
 tare_and_start_timer:
@@ -40,7 +44,8 @@ tare_and_start_timer:
   target:
     entity:
       integration: bookoo_ble
-      domain: sensor
+    device:
+      integration: bookoo_ble
   fields: {}
 
 set_beep_level:
@@ -49,12 +54,14 @@ set_beep_level:
   target:
     entity:
       integration: bookoo_ble
-      domain: sensor
+    device:
+      integration: bookoo_ble
   fields:
     level:
       name: Level
       description: Beep volume level (0-5)
       required: true
+      example: 3
       selector:
         number:
           min: 0
@@ -67,16 +74,20 @@ set_auto_off:
   target:
     entity:
       integration: bookoo_ble
-      domain: sensor
+    device:
+      integration: bookoo_ble
   fields:
     minutes:
       name: Minutes
       description: Auto-off duration in minutes (1-30)
       required: true
+      example: 10
       selector:
         number:
           min: 1
           max: 30
+          step: 1
+          mode: slider # or box
           unit_of_measurement: minutes
 
 set_flow_smoothing:
@@ -85,11 +96,13 @@ set_flow_smoothing:
   target:
     entity:
       integration: bookoo_ble
-      domain: sensor
+    device:
+      integration: bookoo_ble
   fields:
     enabled:
       name: Enabled
       description: Enable flow smoothing
       required: true
+      example: true
       selector:
         boolean:

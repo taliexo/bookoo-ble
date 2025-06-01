@@ -2,3 +2,5 @@
 /psvenv
 __pycache__/
 project_plan.md
+.DS_Store
+.gitignore

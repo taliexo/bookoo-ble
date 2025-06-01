@@ -59,16 +59,12 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Use the device name as the default name, if available
         name = discovery_info.name or DEFAULT_NAME
         
-        # Create an entry for the discovered device
-        return self.async_create_entry(
-            title=name,
-            data={
-                CONF_ADDRESS: discovery_info.address,
-                CONF_NAME: name,
-                "beep_level": DEFAULT_BEEP_LEVEL,
-                "auto_off_minutes": DEFAULT_AUTO_OFF_MINUTES,
-                "flow_smoothing": DEFAULT_FLOW_SMOOTHING,
-            },
+        # Show a confirmation form to the user
+        self.context["title_placeholders"] = {"name": name, "address": discovery_info.address}
+        return self.async_show_form(
+            step_id="bluetooth_confirm",
+            description_placeholders={"name": name, "address": discovery_info.address},
+            # errors=errors, # If any validation errors occur
         )
 
     async def async_step_user(
@@ -118,7 +114,17 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Check if any devices were discovered
         if not self._discovered_devices:
-            return self.async_abort(reason="no_devices_found")
+            # No devices found, offer to configure manually
+            _LOGGER.debug("No Bookoo BLE devices found during user scan, offering manual entry.")
+            return self.async_show_form(
+                step_id="manual", # Transition to manual step
+                data_schema=vol.Schema({
+                    vol.Required(CONF_ADDRESS): str,
+                    vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
+                }),
+                description_placeholders={"message": "No devices found. You can enter the MAC address manually."}
+            )
+            # Alternative: return self.async_abort(reason="no_devices_found") if manual entry is not desired here
 
         # Create a list of device options for the selector
         device_options = []
@@ -162,6 +168,70 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
+        )
+
+    async def async_step_bluetooth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the bluetooth confirmation step."""
+        assert self._discovery_info is not None
+        discovery_info = self._discovery_info
+        name = discovery_info.name or DEFAULT_NAME
+
+        if user_input is not None:
+            # User confirmed, create the entry
+            return self.async_create_entry(
+                title=name,
+                data={
+                    CONF_ADDRESS: discovery_info.address,
+                    CONF_NAME: name,
+                    "beep_level": DEFAULT_BEEP_LEVEL, # Consider moving these to options flow
+                    "auto_off_minutes": DEFAULT_AUTO_OFF_MINUTES,
+                    "flow_smoothing": DEFAULT_FLOW_SMOOTHING,
+                },
+            )
+
+        # Should not happen if we come from async_step_bluetooth correctly
+        return self.async_abort(reason="unexpected_flow_state")
+
+    async def async_step_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the manual entry step for MAC address."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            address = user_input[CONF_ADDRESS]
+            name = user_input.get(CONF_NAME, DEFAULT_NAME)
+
+            # Basic MAC address validation (can be improved)
+            if not (isinstance(address, str) and len(address) == 17 and address.count(':') == 5):
+                errors["base"] = "invalid_mac_address"
+            else:
+                await self.async_set_unique_id(address, raise_on_progress=False)
+                self._abort_if_unique_id_configured()
+
+                _LOGGER.info("Creating entry for manually configured Bookoo BLE device: %s (%s)", name, address)
+                return self.async_create_entry(
+                    title=name,
+                    data={
+                        CONF_ADDRESS: address,
+                        CONF_NAME: name,
+                        "beep_level": DEFAULT_BEEP_LEVEL,
+                        "auto_off_minutes": DEFAULT_AUTO_OFF_MINUTES,
+                        "flow_smoothing": DEFAULT_FLOW_SMOOTHING,
+                    },
+                )
+        
+        # Show form for manual entry
+        return self.async_show_form(
+            step_id="manual",
+            data_schema=vol.Schema({
+                vol.Required(CONF_ADDRESS): str,
+                vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
+            }),
+            errors=errors,
+            description_placeholders={"message": "Enter the MAC address of your Bookoo scale."}
         )
 
     @staticmethod
