@@ -10,7 +10,6 @@ from bleak.backends.service import BleakGATTCharacteristic
 from bleak.exc import BleakError
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
-    BluetoothAdvertisementData,
     BluetoothServiceInfoBleak,
     async_ble_device_from_address,
 )
