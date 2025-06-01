@@ -35,6 +35,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+@config_entries.HANDLERS.register(DOMAIN)
 class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Bookoo BLE."""
 
