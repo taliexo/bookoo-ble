@@ -12,7 +12,7 @@ from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_ble_device_from_address,
-    BLEAK_RECONNECT_EXCEPTIONS,
+    # BLEAK_RECONNECT_EXCEPTIONS, # Removed due to import error
 )
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.components.bluetooth.passive_update_processor import (
@@ -245,7 +245,7 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
                 self.async_update_listeners() # Notify entities about connection status change
                 return True
 
-            except (BleakError, asyncio.TimeoutError, *BLEAK_RECONNECT_EXCEPTIONS) as err:
+            except (BleakError, asyncio.TimeoutError) as err:
                 _LOGGER.error("Error connecting to %s: %s", self.device.address, err)
                 await self.disconnect() # Ensure client is cleaned up if connect fails
                 return False
