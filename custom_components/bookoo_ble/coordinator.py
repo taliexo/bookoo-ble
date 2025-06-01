@@ -250,13 +250,36 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
                 self.async_update_listeners()
                 return True
 
+            except asyncio.CancelledError:
+                # If the task was cancelled, don't try to disconnect as it may fail
+                _LOGGER.debug("Connection attempt to %s was cancelled", self.device.address)
+                self._client = None
+                self._is_connected = False
+                self._command_char = None
+                self._weight_char = None
+                raise  # Re-raise the CancelledError
             except (BleakError, asyncio.TimeoutError) as err:
                 _LOGGER.error("Error connecting to %s: %s", self.device.address, err)
-                await self.disconnect()
+                # Only try to disconnect if we're not in a cancelled state
+                try:
+                    await self.disconnect()
+                except asyncio.CancelledError:
+                    _LOGGER.debug("Disconnect cancelled during error cleanup")
+                    self._client = None
+                    self._is_connected = False
+                    self._command_char = None
+                    self._weight_char = None
                 return False
             except Exception as err:
                 _LOGGER.error("Unexpected error connecting to %s: %s", self.device.address, err, exc_info=True)
-                await self.disconnect()
+                try:
+                    await self.disconnect()
+                except asyncio.CancelledError:
+                    _LOGGER.debug("Disconnect cancelled during error cleanup")
+                    self._client = None
+                    self._is_connected = False
+                    self._command_char = None
+                    self._weight_char = None
                 return False
 
     async def disconnect(self) -> None:

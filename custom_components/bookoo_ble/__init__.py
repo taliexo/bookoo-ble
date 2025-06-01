@@ -101,15 +101,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     auto_off_minutes = current_config.get("auto_off_minutes")
     flow_smoothing = current_config.get("flow_smoothing")
 
+    # Apply initial configuration settings
+    # We attempt to apply these settings but don't fail the entire setup if the device
+    # is temporarily unavailable. The settings can be applied later when the device connects.
     if beep_level is not None:
-        _LOGGER.debug("Applying initial beep level: %s", beep_level)
-        await device_coordinator.async_set_beep_level(int(beep_level))
+        _LOGGER.debug("Attempting to apply initial beep level: %s", beep_level)
+        try:
+            await device_coordinator.async_set_beep_level(int(beep_level))
+        except Exception as e:
+            _LOGGER.warning(
+                "Failed to apply initial beep level to %s: %s. Will retry on next connection.",
+                address, e
+            )
+    
     if auto_off_minutes is not None:
-        _LOGGER.debug("Applying initial auto-off minutes: %s", auto_off_minutes)
-        await device_coordinator.async_set_auto_off_minutes(int(auto_off_minutes))
+        _LOGGER.debug("Attempting to apply initial auto-off minutes: %s", auto_off_minutes)
+        try:
+            await device_coordinator.async_set_auto_off_minutes(int(auto_off_minutes))
+        except Exception as e:
+            _LOGGER.warning(
+                "Failed to apply initial auto-off minutes to %s: %s. Will retry on next connection.",
+                address, e
+            )
+    
     if flow_smoothing is not None:
-        _LOGGER.debug("Applying initial flow smoothing: %s", flow_smoothing)
-        await device_coordinator.async_set_flow_smoothing(bool(flow_smoothing))
+        _LOGGER.debug("Attempting to apply initial flow smoothing: %s", flow_smoothing)
+        try:
+            await device_coordinator.async_set_flow_smoothing(bool(flow_smoothing))
+        except Exception as e:
+            _LOGGER.warning(
+                "Failed to apply initial flow smoothing to %s: %s. Will retry on next connection.",
+                address, e
+            )
     
     # Forward entry setup to platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
