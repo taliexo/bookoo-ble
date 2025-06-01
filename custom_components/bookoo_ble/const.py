@@ -63,7 +63,6 @@ ATTR_TARE_ACTIVE: Final = "tare_active"
 ATTR_FLOW_SMOOTHING: Final = "flow_smoothing"
 ATTR_BEEP_LEVEL: Final = "beep_level"
 ATTR_AUTO_OFF_MINUTES: Final = "auto_off_minutes"
-ATTR_TIMER_STATUS: Final = "timer_status" # Added for binary sensor
 
 # Sensor units
 UNIT_GRAMS: Final = "g"
@@ -82,6 +81,3 @@ DEFAULT_NAME: Final = "Bookoo Scale"
 DEFAULT_BEEP_LEVEL: Final = 3
 DEFAULT_AUTO_OFF_MINUTES: Final = 5
 DEFAULT_FLOW_SMOOTHING: Final = False
-
-# Connection/Retry constants
-MAX_RECONNECT_ATTEMPTS: Final = 3  # Max attempts for reconnect_with_backoff
