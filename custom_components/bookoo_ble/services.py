@@ -6,7 +6,6 @@ from typing import Dict, Any, Callable, Awaitable, cast
 import voluptuous as vol
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.helpers.entity import EntityRegistry
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import config_validation as cv
 
