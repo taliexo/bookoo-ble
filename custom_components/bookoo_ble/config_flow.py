@@ -174,25 +174,48 @@ class BookooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the bluetooth confirmation step."""
-        assert self._discovery_info is not None
+        _LOGGER.debug(
+            "Entering async_step_bluetooth_confirm with user_input: %s", user_input
+        )
+        
+        if self._discovery_info is None:
+            _LOGGER.error(
+                "'_discovery_info' is None in async_step_bluetooth_confirm. "
+                "This indicates the discovery data was lost. Aborting."
+            )
+            return self.async_abort(reason="discovery_info_missing")
+
         discovery_info = self._discovery_info
         name = discovery_info.name or DEFAULT_NAME
-
+        
+        # When the confirmation form (shown by async_step_bluetooth) is submitted,
+        # user_input will be an empty dictionary {} if no data_schema was provided,
+        # or it will contain data if a schema was provided.
+        # The key is that user_input is not None if the form was submitted.
         if user_input is not None:
-            # User confirmed, create the entry
+            _LOGGER.debug(
+                "User confirmed Bluetooth device: %s (%s). Creating entry.",
+                name,
+                discovery_info.address,
+            )
             return self.async_create_entry(
                 title=name,
                 data={
                     CONF_ADDRESS: discovery_info.address,
                     CONF_NAME: name,
-                    "beep_level": DEFAULT_BEEP_LEVEL, # Consider moving these to options flow
+                    "beep_level": DEFAULT_BEEP_LEVEL,
                     "auto_off_minutes": DEFAULT_AUTO_OFF_MINUTES,
                     "flow_smoothing": DEFAULT_FLOW_SMOOTHING,
                 },
             )
 
-        # Should not happen if we come from async_step_bluetooth correctly
-        return self.async_abort(reason="unexpected_flow_state")
+        # This path (user_input is None) should ideally not be hit if 
+        # this step is only reached via form submission from async_step_bluetooth.
+        _LOGGER.warning(
+            "async_step_bluetooth_confirm was called but user_input is None. "
+            "This is an unexpected state."
+        )
+        return self.async_abort(reason="unexpected_user_input") # More specific error
 
     async def async_step_manual(
         self, user_input: dict[str, Any] | None = None
