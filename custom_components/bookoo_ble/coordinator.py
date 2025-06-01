@@ -13,6 +13,7 @@ from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_ble_device_from_address,
 )
+from homeassistant.components.bluetooth.models import BluetoothAdvertisementData
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.components.bluetooth.passive_update_processor import (
     PassiveBluetoothDataProcessor,
@@ -225,8 +226,8 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
                 self._expected_disconnect = False
                 self._update_received = False
 
-                # Get services and characteristics
-                svcs = await client.get_services()
+                # Get services to find characteristics
+                svcs = client.services
                 self._command_char = svcs.get_characteristic(CHAR_COMMAND_UUID)
                 self._weight_char = svcs.get_characteristic(CHAR_WEIGHT_UUID)
 
@@ -361,31 +362,35 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
             len(data_bytes)
         )
         
-        # Construct a BluetoothServiceInfoBleak for the update
-        # Create a minimal BluetoothServiceInfoBleak with required parameters
-        # Note: We're using dummy values for some fields since we don't have the actual data from a scan
-        service_info = BluetoothServiceInfoBleak(
-            name=self.device.device_name or "Bookoo Scale",
-            address=self.device.address,
-            rssi=-70,  # Default RSSI as we don't have it from notifications
-            manufacturer_data={},
-            service_uuids=[],
-            service_data={},
-            service_data_uuids=[],
-            source="notification",  # Custom source to indicate this is from a notification
-            device=None,  # BleakDeviceInfo object, not needed for our use case
-            advertisement=BluetoothAdvertisementData(
-                local_name=self.device.device_name or "Bookoo Scale",
+        # Get the latest service info from the passive coordinator if available
+        service_info = None
+        if hasattr(self.passive_coordinator, 'last_service_info'):
+            service_info = self.passive_coordinator.last_service_info
+        
+        # If we don't have service info, create a minimal one
+        if service_info is None:
+            service_info = BluetoothServiceInfoBleak(
+                name=self.device.device_name or "Bookoo Scale",
+                address=self.device.address,
+                rssi=-70,  # Default RSSI as we don't have it from notifications
                 manufacturer_data={},
+                service_uuids=[SERVICE_UUID],
                 service_data={},
-                service_uuids=[],
-                platform_data=None,
-                tx_power=None,
-                rssi=-70,
-            ),
-            time=0,  # Timestamp, not critical for our use case
-            connectable=True,  # Assume device is connectable
-        )
+                service_data_uuids=[],
+                source="notification",  # Custom source to indicate this is from a notification
+                device=None,  # BleakDeviceInfo object, not needed for our use case
+                advertisement=BluetoothAdvertisementData(
+                    local_name=self.device.device_name or "Bookoo Scale",
+                    manufacturer_data={},
+                    service_data={},
+                    service_uuids=[SERVICE_UUID],
+                    platform_data=None,
+                    tx_power=None,
+                    rssi=-70,
+                ),
+                time=0,  # Timestamp, not critical for our use case
+                connectable=True,  # Assume device is connectable
+            )
         
         # Update the internal state via the passive coordinator
         if hasattr(self.passive_coordinator, 'processor'):
