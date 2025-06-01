@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Union
 from bleak.backends.device import BLEDevice
 from bleak.backends.service import BleakGATTCharacteristic
 from bleak.exc import BleakError
-from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS, BleakClientWithServiceCache
+from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS, BleakClientWithServiceCache, establish_connection
 from homeassistant.components.bluetooth import (
     BluetoothScanningMode,
     BluetoothServiceInfoBleak,
@@ -46,16 +46,16 @@ class BookooPassiveBluetoothDataProcessor(PassiveBluetoothDataProcessor):
 
     def __init__(
         self,
-        sensor_update_callback: Callable[[Dict[str, Any]], None],
+        sensor_update_callback: Callable[[PassiveBluetoothDataUpdate], None],
     ) -> None:
         """Initialize the data processor."""
         super().__init__(sensor_update_callback)
         self._tracked_devices: Dict[str, BookooBluetoothDeviceData] = {}
 
-    def _create_or_update_device(
+    def update_device_info(
         self, service_info: BluetoothServiceInfoBleak
     ) -> BookooBluetoothDeviceData:
-        """Create or update a Bookoo device from service info."""
+        """Create or update device information."""
         address = service_info.address
         device_name = service_info.name or "Bookoo Scale"
         model = "Bookoo Mini Scale"
@@ -79,7 +79,7 @@ class BookooPassiveBluetoothDataProcessor(PassiveBluetoothDataProcessor):
         self, service_info: BluetoothServiceInfoBleak, data: bytes
     ) -> None:
         """Update from notification data."""
-        device = self._create_or_update_device(service_info)
+        device = self.update_device_info(service_info)
         
         parsed_data = BookooBluetoothParser.parse_notification(data)
         if not parsed_data:
@@ -126,13 +126,14 @@ class BookooPassiveBluetoothDataProcessor(PassiveBluetoothDataProcessor):
                 entity_data[entity_key] = value
                 
         if entity_data:
-            self.sensor_update_callback(
-                PassiveBluetoothDataUpdate(
-                    devices={service_info.address: device},
-                    entity_descriptions={},
-                    entity_data=entity_data,
-                    entity_names={},
-                )
+            self.async_handle_update(
+                service_info.address,
+                {
+                    "entity_data": entity_data,
+                    "entity_descriptions": {},
+                    "entity_names": {},
+                    "entity_pictures": {},
+                },
             )
 
 
@@ -177,13 +178,14 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
             
         try:
             _LOGGER.debug("Connecting to %s", self.device.address)
-            self._client = BleakClientWithServiceCache(
+            self._client = await establish_connection(
+                BleakClientWithServiceCache,
                 ble_device,
+                self.device.address,
                 disconnected_callback=self._handle_disconnect,
                 timeout=10.0,
             )
             
-            await self._client.connect()
             _LOGGER.debug("Connected to %s", self.device.address)
             
             # Get the command and weight characteristics
@@ -280,18 +282,24 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
     async def _wait_for_notifications(self) -> None:
         """Wait for notifications or timeout."""
         try:
-            for _ in range(NOTIFICATION_TIMEOUT_SECONDS):
-                if self._update_received or self._disconnect_event.is_set():
-                    break
-                await asyncio.sleep(1)
+            async with asyncio.timeout(NOTIFICATION_TIMEOUT_SECONDS):
+                # Wait until we receive data or disconnect
+                while not self._update_received and not self._disconnect_event.is_set():
+                    await asyncio.sleep(1)
                 
-            if not self._update_received and not self._disconnect_event.is_set():
-                _LOGGER.warning(
-                    "No notifications received from %s after %d seconds",
-                    self.device.address,
-                    NOTIFICATION_TIMEOUT_SECONDS,
-                )
-                await self.disconnect()
+                if not self._update_received and not self._disconnect_event.is_set():
+                    _LOGGER.warning(
+                        "No notifications received from %s after %d seconds",
+                        self.device.address,
+                        NOTIFICATION_TIMEOUT_SECONDS,
+                    )
+                    await self.disconnect()
+        except asyncio.TimeoutError:
+            _LOGGER.warning(
+                "Timeout waiting for notifications from %s",
+                self.device.address,
+            )
+            await self.disconnect()
         except asyncio.CancelledError:
             pass
         except Exception as err:  # pylint: disable=broad-except
@@ -304,9 +312,13 @@ class BookooDeviceCoordinator(DataUpdateCoordinator[None]):
                 return False
                 
         try:
-            await self._client.write_gatt_char(self._command_char, command)
-            _LOGGER.debug("Sent command: %s", command.hex())
-            return True
+            async with asyncio.timeout(5):  # 5 second timeout
+                await self._client.write_gatt_char(self._command_char, command)
+                _LOGGER.debug("Sent command: %s", command.hex())
+                return True
+        except asyncio.TimeoutError:
+            _LOGGER.error("Timeout sending command to %s", self.device.address)
+            return False
         except (BleakError, *BLEAK_RETRY_EXCEPTIONS) as err:
             _LOGGER.error("Error sending command to %s: %s", self.device.address, err)
             return False

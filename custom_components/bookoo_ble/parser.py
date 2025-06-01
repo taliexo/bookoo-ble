@@ -24,16 +24,22 @@ class BookooBluetoothParser:
 
     @staticmethod
     def parse_notification(data: bytes) -> Optional[Dict[str, Any]]:
-        """Parse notification data from Bookoo device."""
+        """Parse notification data from Bookoo device.
+        
+        Handles notifications from both the weight data characteristic (0xFF11)
+        and the command characteristic (0xFF12).
+        """
         if len(data) < 2:
             _LOGGER.debug("Notification too short: %d bytes", len(data))
             return None
         
         msg_identifier = data[1]
 
-        if msg_identifier == MSG_TYPE_WEIGHT:  # 0x0B
+        if msg_identifier == MSG_TYPE_WEIGHT:  # 0x0B - Weight data on 0xFF11
             return BookooBluetoothParser._parse_weight_notification(data)
-        elif data[0] == 0x03 and msg_identifier == MSG_TYPE_TIMER_STATUS:  # 0x0D
+        elif data[0] == 0x03 and msg_identifier == MSG_TYPE_TIMER_STATUS:  # 0x0D - Timer status on 0xFF12
+            # Note: As documented in memories, the scale sends timer status notifications
+            # on the COMMAND characteristic (0xFF12) with data[0]=0x03 and data[1]=0x0D
             return BookooBluetoothParser._parse_status_notification(data)
         
         _LOGGER.debug("Unknown message type/identifier: %02x, data: %s", msg_identifier, data.hex())
@@ -42,7 +48,7 @@ class BookooBluetoothParser:
     @staticmethod
     def _parse_weight_notification(data: bytes) -> Optional[Dict[str, Any]]:
         """
-        Parse weight notification data (type 0x0B).
+        Parse weight notification data (type 0x0B) from the 0xFF11 characteristic.
         Format (20 data bytes + 1 checksum byte):
         - Byte 0: Product number (0x03)
         - Byte 1: Type (0x0B)
@@ -69,6 +75,7 @@ class BookooBluetoothParser:
             return None
         
         if not validate_checksum(data[:21]):
+            _LOGGER.debug("Invalid weight notification checksum for data: %s", data[:21].hex())
             return None
         
         timer_ms = (data[2] << 16) | (data[3] << 8) | data[4]
@@ -106,13 +113,17 @@ class BookooBluetoothParser:
     @staticmethod
     def _parse_status_notification(data: bytes) -> Optional[Dict[str, Any]]:
         """
-        Parse status notification data (timer status).
+        Parse status notification data (timer status) from the 0xFF12 characteristic.
         Format (20 data bytes + 1 checksum byte):
         - Byte 0: Product number (0x03)
         - Byte 1: Type/Length (0x0D)
         - Byte 2: Status (0x01 = timer started, 0x00 = timer stopped)
         - Bytes 3-19: Padding (all 0x00)
         - Byte 20: Checksum
+        
+        Note: As documented in the memories, the scale sends timer status notifications
+        on the COMMAND characteristic (0xFF12) even though this isn't documented in
+        the scale_protocols.md document.
         """
         if len(data) < 21:
             _LOGGER.debug("Status notification too short: %d bytes, data: %s", len(data), data.hex())
@@ -124,6 +135,7 @@ class BookooBluetoothParser:
             return None
         
         if not validate_checksum(data[:21]):
+            _LOGGER.debug("Invalid status notification checksum for data: %s", data[:21].hex())
             return None
         
         timer_status_byte = data[2]

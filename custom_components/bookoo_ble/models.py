@@ -29,7 +29,7 @@ class BookooBluetoothDeviceData:
     address: str
     device_name: str
     model: str
-    service_info: BluetoothServiceInfoBleak
+    service_info: Optional[BluetoothServiceInfoBleak]
     data: BookooData
     firmware_version: Optional[str] = None
     hardware_version: Optional[str] = None

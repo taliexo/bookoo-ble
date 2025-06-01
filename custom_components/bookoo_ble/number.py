@@ -76,7 +76,6 @@ async def async_setup_entry(
             BookooNumber(
                 device_coordinator,
                 description,
-                entry.entry_id,
             )
         )
 
@@ -92,12 +91,10 @@ class BookooNumber(NumberEntity):
         self,
         coordinator: BookooDeviceCoordinator,
         description: BookooNumberEntityDescription,
-        entry_id: str,
     ) -> None:
         """Initialize the number entity."""
         self.entity_description = description
         self._coordinator = coordinator
-        self._entry_id = entry_id
         
         # Set the unique ID using the device address and entity key
         self._attr_unique_id = f"{coordinator.device.address}_{description.key}"
@@ -124,8 +121,6 @@ class BookooNumber(NumberEntity):
         """Set the value."""
         if self.entity_description.set_value_fn:
             await self.entity_description.set_value_fn(self._coordinator, value)
-            # Trigger an update to refresh the coordinator's data
-            await self._coordinator.async_request_refresh()
 
     @property
     def available(self) -> bool:

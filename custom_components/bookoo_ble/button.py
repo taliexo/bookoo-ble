@@ -75,7 +75,6 @@ async def async_setup_entry(
             BookooButton(
                 device_coordinator,
                 description,
-                entry.entry_id,
             )
         )
 
@@ -91,12 +90,10 @@ class BookooButton(ButtonEntity):
         self,
         coordinator: BookooDeviceCoordinator,
         description: BookooButtonEntityDescription,
-        entry_id: str,
     ) -> None:
         """Initialize the button."""
         self.entity_description = description
         self._coordinator = coordinator
-        self._entry_id = entry_id
         
         # Set the unique ID using the device address and entity key
         self._attr_unique_id = f"{coordinator.device.address}_{description.key}"

@@ -56,7 +56,6 @@ async def async_setup_entry(
             BookooSwitch(
                 device_coordinator,
                 description,
-                entry.entry_id,
             )
         )
 
@@ -72,12 +71,10 @@ class BookooSwitch(SwitchEntity):
         self,
         coordinator: BookooDeviceCoordinator,
         description: BookooSwitchEntityDescription,
-        entry_id: str,
     ) -> None:
         """Initialize the switch entity."""
         self.entity_description = description
         self._coordinator = coordinator
-        self._entry_id = entry_id
         
         # Set the unique ID using the device address and entity key
         self._attr_unique_id = f"{coordinator.device.address}_{description.key}"
@@ -104,15 +101,11 @@ class BookooSwitch(SwitchEntity):
         """Turn on the switch."""
         if self.entity_description.set_value_fn:
             await self.entity_description.set_value_fn(self._coordinator, True)
-            # Trigger an update to refresh the coordinator's data
-            await self._coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the switch."""
         if self.entity_description.set_value_fn:
             await self.entity_description.set_value_fn(self._coordinator, False)
-            # Trigger an update to refresh the coordinator's data
-            await self._coordinator.async_request_refresh()
 
     @property
     def available(self) -> bool:

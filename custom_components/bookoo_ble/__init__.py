@@ -10,11 +10,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, CONF_NAME, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER
 from .coordinator import BookooDeviceCoordinator, BookooPassiveBluetoothDataProcessor
-from .models import BookooBluetoothDeviceData
+from .models import BookooBluetoothDeviceData, BookooData
 from .services import async_setup_services, async_unload_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,29 +37,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     _LOGGER.debug("Setting up Bookoo BLE for %s (%s)", name, address)
 
-    # Create a device data object with basic information
-    # This will be updated when we receive notifications
+    # Create initial device data
     device_data = BookooBluetoothDeviceData(
         address=address,
         device_name=name,
         model="Bookoo Mini Scale",
-        service_info=None,  # Will be set when notifications are received
-        data=None,  # Will be set when notifications are received
+        service_info=None,  # Will be set when we receive notifications
+        data=BookooData(),
         manufacturer=MANUFACTURER,
     )
     
-    # Create a passive update processor
-    ble_processor = BookooPassiveBluetoothDataProcessor(
-        lambda service_info, update: None,  # Will be set by the coordinator
+    # Create the passive update processor and coordinator
+    passive_processor = BookooPassiveBluetoothDataProcessor(
+        sensor_update_callback=lambda data_update: None,  # Placeholder, set by coordinator
     )
     
-    # Create the passive update coordinator
     passive_coordinator = PassiveBluetoothProcessorCoordinator(
         hass,
         _LOGGER,
         address=address,
         mode=BluetoothScanningMode.ACTIVE,
-        update_processor=ble_processor,
+        update_processor=passive_processor,
     )
     
     # Create the device coordinator
@@ -70,8 +67,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Connect to the device
     if not await device_coordinator.connect_and_setup():
-        # We don't raise ConfigEntryNotReady here because the device may be offline
-        # temporarily. The Bluetooth integration will keep trying to connect.
         _LOGGER.warning("Could not connect to Bookoo device %s (%s)", name, address)
     
     # Store coordinators in hass.data
@@ -138,35 +133,3 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry."""
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)
-
-
-class BookooEntity(CoordinatorEntity):
-    """Base class for Bookoo BLE entities."""
-
-    def __init__(
-        self,
-        device_coordinator: BookooDeviceCoordinator,
-        description_key: str,
-    ) -> None:
-        """Initialize the entity."""
-        super().__init__(device_coordinator)
-        self._device_coordinator = device_coordinator
-        self._device = device_coordinator.device
-        self.entity_description_key = description_key
-        
-        # Set the entity's unique ID
-        self._attr_unique_id = f"{self._device.address}_{description_key}"
-        
-        # Link the entity to the device
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, self._device.address)},
-            "name": self._device.device_name,
-            "manufacturer": MANUFACTURER,
-            "model": self._device.model,
-        }
-        
-    @property
-    def available(self) -> bool:
-        """Return if the entity is available."""
-        # The coordinator will handle device availability
-        return self._device_coordinator.last_update_success
